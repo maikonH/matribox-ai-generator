@@ -1,7 +1,12 @@
+import { deflate } from 'pako';
 import type { GeneratedPreset } from './types';
 
 export function downloadPreset(preset: GeneratedPreset): void {
-  const blob = new Blob([JSON.stringify(preset, null, 2)], { type: 'application/json' });
+  const jsonString = JSON.stringify(preset, null, 2);
+  const bytes = new TextEncoder().encode(jsonString);
+  const compressed = deflate(bytes);
+
+  const blob = new Blob([compressed], { type: 'application/octet-stream' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   const safeName = preset.title
