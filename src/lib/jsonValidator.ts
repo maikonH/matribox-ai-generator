@@ -26,6 +26,7 @@ type RawAlgorithm = Record<string, unknown> & {
   params?: RawParam[];
   parameters?: RawParam[];
   controls?: RawParam[];
+  widget?: RawParam[];
 };
 
 function asString(val: unknown, fallback = ''): string {
@@ -70,7 +71,7 @@ function normalizeAlgorithm(raw: RawAlgorithm): Algorithm | null {
 
   if (!fxId && !fxTitle) return null;
 
-  const paramSource = raw.params ?? raw.parameters ?? raw.controls ?? [];
+  const paramSource = raw.params ?? raw.parameters ?? raw.controls ?? raw.widget ?? [];
   const params = Array.isArray(paramSource) ? paramSource.map(normalizeParam) : [];
 
   return {
@@ -85,38 +86,52 @@ function normalizeAlgorithm(raw: RawAlgorithm): Algorithm | null {
 }
 
 /**
- * Recursively scans any JSON structure to find the first array of objects
- * that can be normalized into algorithms. Handles arbitrary nesting and
- * unknown wrapper key names (e.g. data.effects, presetList, fxData, etc).
+ * Heuristic: does this object look like an algorithm/effect node?
+ * It must have an identifying key (fxId/id/effectId) OR a title key
+ * (fxTitle/name/title/label), AND ideally a params/widget array.
+ * Pure container/group objects (no identifying keys) are skipped.
  */
-function findAlgorithmArray(raw: unknown, depth = 0): RawAlgorithm[] {
-  if (depth > 5) return [];
+function looksLikeAlgorithm(obj: Record<string, unknown>): boolean {
+  const hasId =
+    'fxId' in obj || 'id' in obj || 'effectId' in obj;
+  const hasTitle =
+    'fxTitle' in obj || 'name' in obj || 'title' in obj || 'label' in obj;
+  const hasParams =
+    'params' in obj || 'parameters' in obj || 'controls' in obj || 'widget' in obj;
+  return (hasId || hasTitle) && (hasParams || hasId || hasTitle);
+}
+
+/**
+ * Deep flatten: recursively walks the entire JSON tree and collects
+ * EVERY object that looks like an algorithm into a single linear list.
+ * Unlike the old approach (which stopped at the first array found),
+ * this continues into nested objects and arrays at any depth, so
+ * effects hidden inside category/group wrappers are all gathered.
+ */
+function deepCollectAlgorithms(raw: unknown, depth: number, out: RawAlgorithm[]): void {
+  if (depth > 12) return;
 
   if (Array.isArray(raw)) {
-    return raw as RawAlgorithm[];
+    for (const item of raw) {
+      deepCollectAlgorithms(item, depth + 1, out);
+    }
+    return;
   }
 
   if (raw && typeof raw === 'object') {
     const obj = raw as Record<string, unknown>;
-    const values = Object.values(obj);
 
-    // First pass: find the first direct child that is an array
-    for (const val of values) {
-      if (Array.isArray(val) && val.length > 0) {
-        return val as RawAlgorithm[];
-      }
+    if (looksLikeAlgorithm(obj)) {
+      out.push(obj as RawAlgorithm);
     }
 
-    // Second pass: recurse into nested objects to find deeper arrays
-    for (const val of values) {
-      if (val && typeof val === 'object' && !Array.isArray(val)) {
-        const found = findAlgorithmArray(val, depth + 1);
-        if (found.length > 0) return found;
+    // Always recurse into children so we catch nested effects inside groups
+    for (const val of Object.values(obj)) {
+      if (val && typeof val === 'object') {
+        deepCollectAlgorithms(val, depth + 1, out);
       }
     }
   }
-
-  return [];
 }
 
 export function validateAlgData(rawJson: string): ValidationResult {
@@ -132,16 +147,22 @@ export function validateAlgData(rawJson: string): ValidationResult {
     };
   }
 
-  const candidates = findAlgorithmArray(parsed);
+  const collected: RawAlgorithm[] = [];
+  deepCollectAlgorithms(parsed, 0, collected);
 
+  const seen = new Set<string>();
   const algorithms: Algorithm[] = [];
-  for (const candidate of candidates) {
-    if (!candidate || typeof candidate !== 'object') continue;
-    const norm = normalizeAlgorithm(candidate as RawAlgorithm);
-    if (norm) algorithms.push(norm);
+  for (const candidate of collected) {
+    const norm = normalizeAlgorithm(candidate);
+    if (!norm) continue;
+    // Dedupe by fxId so the same effect appearing in multiple groups
+    // doesn't produce duplicates in the final list.
+    if (seen.has(norm.fxId)) continue;
+    seen.add(norm.fxId);
+    algorithms.push(norm);
   }
 
-  // Fallback: if no array was found, try treating the root as a single algorithm
+  // Fallback: if nothing looked like an algorithm, try the root itself
   if (algorithms.length === 0 && parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     const single = normalizeAlgorithm(parsed as RawAlgorithm);
     if (single) {
@@ -153,7 +174,7 @@ export function validateAlgData(rawJson: string): ValidationResult {
     return {
       success: false,
       algorithms: [],
-      error: 'Nenhum algoritmo válido encontrado no arquivo. Verifique se o JSON contém uma lista de efeitos com os campos fxId/fxTitle (ou name).',
+      error: 'Nenhum algoritmo válido encontrado no arquivo. Verifique se o JSON contém efeitos com os campos fxId/fxTitle (ou name) e params/widget.',
       count: 0,
     };
   }
