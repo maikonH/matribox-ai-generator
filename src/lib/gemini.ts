@@ -2,7 +2,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { Algorithm, GeneratedPreset } from './types';
 import { findAlgorithm } from './algorithmStore';
 
-const MODEL_NAME = 'gemini-2.5-flash-lite';
+const MODEL_NAME = 'gemini-3.1-flash-lite';
 
 function buildSystemPrompt(algorithms: Algorithm[]): string {
   const algList = algorithms
