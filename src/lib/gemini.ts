@@ -93,7 +93,7 @@ export async function generatePreset(
   userPrompt: string,
   algorithms: Algorithm[],
 ): Promise<GeneratedPreset> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error('VITE_GEMINI_API_KEY não configurada. Abra Settings e adicione sua chave do Gemini.');
   }
