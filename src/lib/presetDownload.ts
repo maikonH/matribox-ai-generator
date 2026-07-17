@@ -46,8 +46,13 @@ function buildPresetBuffer(_preset: GeneratedPreset): number[] {
 export function downloadPreset(preset: GeneratedPreset): void {
   const buffer = buildPresetBuffer(preset);
 
-  const jsonStr = JSON.stringify(Array.from(buffer));
-  const b64 = btoa(jsonStr);
+  // Explicit no-space serialization: every value joined by ',' with no
+  // whitespace, wrapped in brackets. Guarantees a 100% glued string that
+  // Dart's strict base64 + JSON decoders accept without rejection.
+  const jsonStr = '[' + Array.from(buffer).join(',') + ']';
+  // btoa emits pure ASCII base64. Strip any stray whitespace/newlines as a
+  // belt-and-suspenders guarantee for Dart's strict base64 decoder.
+  const b64 = btoa(jsonStr).replace(/\s+/g, '');
 
   const blob = new Blob([b64], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
