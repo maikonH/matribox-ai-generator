@@ -131,69 +131,35 @@ function resolveBlockType(modType: string): string | null {
   return null;
 }
 
-function buildPresetBuffer(preset: GeneratedPreset): number[] {
+function buildPresetBuffer(_preset: GeneratedPreset): number[] {
+  // ======================================================================
+  // FROZEN-DATA ISOLATION TEST
+  // ----------------------------------------------------------------------
+  // The hardware importer rejected dynamically-injected IDs/sliders, which
+  // points at a checksum or structural invariant we have not reverse-
+  // engineered yet. To isolate the failure we freeze EVERY mutation and
+  // emit the master buffer byte-for-byte identical to the 423-byte capture,
+  // changing only the single volume byte at offset 123 → fixed value 80.
+  //
+  // If the hardware still rejects this, the checksum covers offset 123 and
+  // we must locate+patch the checksum field too. If it imports cleanly,
+  // we re-enable mutations one at a time to find the breaking change.
+  // ======================================================================
   const buffer = decodeMaster().slice();
 
-  // --- Preset name -------------------------------------------------------
-  const fieldLen = PRESET_NAME_END - PRESET_NAME_START + 1;
-  const nameBytes = encodeString(preset.title).slice(0, fieldLen);
-  for (let i = 0; i < fieldLen; i++) {
-    buffer[PRESET_NAME_START + i] = nameBytes[i] ?? 0;
-  }
+  // --- ONLY mutation: master volume byte (offset 123) → 80 ---------------
+  buffer[VOLUME_BYTE] = 80;
 
-  // --- BPM + master volume ----------------------------------------------
-  if (typeof preset.bpm === 'number') {
-    buffer[BPM_BYTE] = clampInt(preset.bpm, 0, 255);
-  }
-  if (typeof preset.volume === 'number') {
-    // volume 0-100 → store as-is in the drawer's first byte
-    buffer[VOLUME_BYTE] = clampInt(preset.volume, 0, 100);
-  }
-
-  // --- Algorithm IDs + slider drawers ------------------------------------
-  // Walk every module the AI returned, route it to its block, patch the
-  // algorithm-ID triplet in the module slot, and write each param value
-  // into its 3-byte drawer.
-  const usedBlocks = new Set<string>();
-  for (const mod of preset.modules) {
-    const blockType = resolveBlockType(mod.type);
-    if (!blockType) continue;
-    usedBlocks.add(blockType);
-
-    // Patch the algorithm-ID triplet in the module slot.
-    const slot = MODULE_SLOTS.find((s) => s.type === blockType);
-    if (slot) {
-      const idTriplet = FX_ID_BYTES[mod.fxId];
-      if (idTriplet) {
-        buffer[slot.idOffset] = idTriplet[0];
-        buffer[slot.idOffset + 1] = idTriplet[1];
-        buffer[slot.idOffset + 2] = idTriplet[2];
-      }
-    }
-
-    // Write slider values into the parameter drawers.
-    const drawer = PARAM_DRAWERS[blockType];
-    if (drawer) {
-      const params = mod.params ?? [];
-      for (let i = 0; i < drawer.count && i < params.length; i++) {
-        const p = params[i];
-        // Normalise any param range to a 0-100 slider value.
-        const span = (p.max ?? 100) - (p.min ?? 0);
-        const norm = span > 0 ? ((p.value - (p.min ?? 0)) / span) * 100 : p.value;
-        writeDrawer(buffer, drawer.start + i * 3, norm);
-      }
-    }
-  }
-
-  // For any block the AI did not populate, keep the master's default
-  // algorithm-ID and zero the drawers so the block loads cleanly.
-  for (const blockType of Object.keys(PARAM_DRAWERS)) {
-    if (usedBlocks.has(blockType)) continue;
-    const drawer = PARAM_DRAWERS[blockType];
-    for (let i = 0; i < drawer.count; i++) {
-      writeDrawer(buffer, drawer.start + i * 3, 0);
-    }
-  }
+  // All other mutations (preset name, BPM, algorithm IDs, slider drawers)
+  // are intentionally disabled for this isolation test.
+  // const fieldLen = PRESET_NAME_END - PRESET_NAME_START + 1;
+  // const nameBytes = encodeString(preset.title).slice(0, fieldLen);
+  // for (let i = 0; i < fieldLen; i++) {
+  //   buffer[PRESET_NAME_START + i] = nameBytes[i] ?? 0;
+  // }
+  // if (typeof preset.bpm === 'number') buffer[BPM_BYTE] = clampInt(preset.bpm, 0, 255);
+  // if (typeof preset.volume === 'number') buffer[VOLUME_BYTE] = clampInt(preset.volume, 0, 100);
+  // ... algorithm-ID + slider-drawer injection disabled ...
 
   return buffer;
 }
