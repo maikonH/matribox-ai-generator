@@ -26,21 +26,12 @@ function clampInt(v: number, min: number, max: number): number {
 }
 
 function buildPresetBuffer(_preset: GeneratedPreset): number[] {
-  // Clone the frozen factory template as plain numbers (NOT Uint8Array —
-  // that would truncate the float at index 65 and break the device).
-  const buffer = decodeTemplate().slice();
-
-  // --- ISOLATION TEST: name left exactly as factory ("Matribox II PRO") ---
-  // const fieldLen = PRESET_NAME_END - PRESET_NAME_START + 1;
-  // const nameBytes = encodeString(preset.title).slice(0, fieldLen);
-  // for (let i = 0; i < fieldLen; i++) {
-  //   buffer[PRESET_NAME_START + i] = nameBytes[i] ?? 0;
-  // }
-
-  // Only the gain byte is changed, using a fixed safe value for this test.
-  buffer[GAIN_BYTE] = 80;
-
-  return buffer;
+  // === FROZEN / ISOLATION MODE ===
+  // No dynamic modifications: no name change, no volume change, no slider
+  // changes, no algorithm ID changes. Returns the pristine factory template
+  // byte-for-byte so we can verify the pipeline itself produces an accepted
+  // .prst file. Reactivate modifications one-by-one after the device accepts.
+  return decodeTemplate();
 }
 
 export function downloadPreset(preset: GeneratedPreset): void {
