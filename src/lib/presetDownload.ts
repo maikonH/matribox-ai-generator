@@ -14,6 +14,9 @@ const PARAM_TABLE_START = 0xb0;
 const PARAM_TABLE_END = 0xd3;
 const PARAM_ENTRY_SIZE = 4;
 
+const CHECKSUM_BYTE_INDEX = 0x1e1;
+const CHECKSUM_COVERAGE_END = 0x1e0;
+
 function decodeTemplate(): number[] {
   const decoded = atob(TEMPLATE_B64);
   return JSON.parse(decoded);
@@ -62,28 +65,42 @@ function injectParams(template: number[], modules: PresetModule[]): number[] {
   return result;
 }
 
+function writeFixedString(
+  template: number[],
+  start: number,
+  end: number,
+  str: string,
+): void {
+  const fieldLen = end - start + 1;
+  const encoded = encodeString(str).slice(0, fieldLen);
+  for (let i = 0; i < fieldLen; i++) {
+    template[start + i] = i < encoded.length ? encoded[i] : 0;
+  }
+}
+
+function computeChecksum(bytes: number[]): number {
+  let sum = 0;
+  for (let i = 0; i <= CHECKSUM_COVERAGE_END; i++) {
+    sum = (sum + bytes[i]) & 0xff;
+  }
+  return sum;
+}
+
 function buildPresetBytes(preset: GeneratedPreset): number[] {
   const template = decodeTemplate();
+  const result = [...template];
 
-  const before = template.slice(0, PRESET_NAME_START);
-  const presetNameBytes = [...encodeString(preset.title), 0x00];
+  writeFixedString(result, PRESET_NAME_START, PRESET_NAME_END, preset.title);
   const ampName = preset.modules[0]?.fxTitle ?? 'I PRO';
-  const ampNameBytes = encodeString(ampName);
-  const middle = template.slice(AMP_NAME_END + 1, CATEGORY_START);
+  writeFixedString(result, AMP_NAME_START, AMP_NAME_END, ampName);
   const category = preset.modules[0]?.type ?? 'Rock';
-  const categoryBytes = encodeString(category);
-  const after = template.slice(CATEGORY_END + 1);
+  writeFixedString(result, CATEGORY_START, CATEGORY_END, category);
 
-  const assembled = [
-    ...before,
-    ...presetNameBytes,
-    ...ampNameBytes,
-    ...middle,
-    ...categoryBytes,
-    ...after,
-  ];
+  injectParams(result, preset.modules);
 
-  return injectParams(assembled, preset.modules);
+  result[CHECKSUM_BYTE_INDEX] = computeChecksum(result);
+
+  return result;
 }
 
 function bytesToBase64(bytes: number[]): string {
@@ -94,22 +111,6 @@ function bytesToBase64(bytes: number[]): string {
     binary += String.fromCharCode(...uint8.subarray(i, i + chunk));
   }
   return btoa(binary);
-}
-
-export function downloadRawTemplate(): void {
-  const bytes = decodeTemplate();
-  const arrayLiteral = JSON.stringify(bytes);
-  const base64 = btoa(arrayLiteral);
-
-  const blob = new Blob([base64], { type: 'text/plain' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'factory_template_original.prst';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }
 
 export function downloadPreset(preset: GeneratedPreset): void {

@@ -7,10 +7,9 @@ interface Props {
   loading: boolean;
   onParamChange: (moduleIndex: number, paramIndex: number, value: number) => void;
   onDownload: () => void;
-  onDownloadRawTemplate: () => void;
 }
 
-export default function PresetCard({ preset, loading, onParamChange, onDownload, onDownloadRawTemplate }: Props) {
+export default function PresetCard({ preset, loading, onParamChange, onDownload }: Props) {
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -58,14 +57,6 @@ export default function PresetCard({ preset, loading, onParamChange, onDownload,
           >
             <Download className="w-4 h-4" />
             Baixar .prst
-          </button>
-          <button
-            onClick={onDownloadRawTemplate}
-            title="Exporta o template original de fábrica sem alterações — para testar se o pipeline de Base64 está correto"
-            className="shrink-0 px-4 py-2.5 rounded-xl bg-slate-800/80 border border-slate-700/60 text-slate-300 font-semibold text-sm flex items-center gap-2 hover:bg-slate-700/80 hover:text-white transition-all whitespace-nowrap"
-          >
-            <Download className="w-4 h-4" />
-            Template original
           </button>
         </div>
 
