@@ -2,7 +2,8 @@ import { useState, useRef, useCallback } from 'react';
 import type { Algorithm } from '../lib/types';
 import { validateAlgData } from '../lib/jsonValidator';
 import { saveAlgorithms, getCategorized } from '../lib/algorithmStore';
-import { X, UploadCloud, FileJson, Check, AlertTriangle, Database, Trash2 } from 'lucide-react';
+import { loadApiKey, saveApiKey } from '../lib/apiKeyStore';
+import { X, UploadCloud, FileJson, Check, AlertTriangle, Database, Trash2, Key, Eye, EyeOff } from 'lucide-react';
 
 interface Props {
   open: boolean;
@@ -23,6 +24,9 @@ export default function SettingsDrawer({
   const [previewCount, setPreviewCount] = useState<number | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [apiKey, setApiKey] = useState(() => loadApiKey());
+  const [showKey, setShowKey] = useState(false);
+  const [keySaved, setKeySaved] = useState(false);
 
   const categories = getCategorized(algorithms);
 
@@ -102,6 +106,49 @@ export default function SettingsDrawer({
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-6">
+          <section>
+            <h3 className="text-slate-300 text-xs font-semibold uppercase tracking-wider mb-3">
+              Chave da API Gemini
+            </h3>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                  <input
+                    type={showKey ? 'text' : 'password'}
+                    value={apiKey}
+                    onChange={(e) => { setApiKey(e.target.value); setKeySaved(false); }}
+                    placeholder="AIza..."
+                    className="w-full h-10 rounded-xl bg-[#0b0f19] border border-slate-800/80 pl-9 pr-10 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/60 focus:ring-2 focus:ring-cyan-500/10 transition-all font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowKey((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                  >
+                    {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <button
+                  onClick={() => { saveApiKey(apiKey.trim()); setKeySaved(true); onToast('Chave salva com sucesso!', 'success'); }}
+                  disabled={!apiKey.trim()}
+                  className="h-10 px-4 rounded-xl bg-gradient-to-r from-cyan-400 to-sky-500 text-slate-950 font-bold text-xs disabled:opacity-40 disabled:cursor-not-allowed transition-all hover:shadow-lg hover:shadow-cyan-500/20 shrink-0"
+                >
+                  Salvar
+                </button>
+              </div>
+              {keySaved && (
+                <div className="flex items-center gap-2 text-xs text-cyan-300 bg-cyan-400/10 border border-cyan-400/30 rounded-lg px-3 py-2">
+                  <Check className="w-3.5 h-3.5" />
+                  Chave salva no navegador
+                </div>
+              )}
+              <p className="text-slate-600 text-xs">
+                A chave fica armazenada apenas localmente no navegador e nunca é enviada a terceiros.
+              </p>
+            </div>
+          </section>
+
           <section>
             <h3 className="text-slate-300 text-xs font-semibold uppercase tracking-wider mb-3">
               Upload do alg_data.json
