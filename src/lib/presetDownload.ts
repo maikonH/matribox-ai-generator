@@ -5,10 +5,6 @@ const TEMPLATE_B64 =
 
 const PRESET_NAME_START = 0x1d;
 const PRESET_NAME_END = 0x27;
-const AMP_NAME_START = 0x28;
-const AMP_NAME_END = 0x2c;
-const CATEGORY_START = 0x6b;
-const CATEGORY_END = 0x6e;
 
 const PARAM_TABLE_START = 0xb0;
 const PARAM_TABLE_END = 0xd3;
@@ -35,87 +31,50 @@ function normalizeParam(value: number, min: number, max: number): number {
   return clampByte(((value - min) / (max - min)) * 100);
 }
 
-function collectParamEntries(modules: PresetModule[]): { id: number; value: number }[] {
-  const entries: { id: number; value: number }[] = [];
-  let paramId = 0;
+function collectParamEntries(modules: PresetModule[]): number[] {
+  const values: number[] = [];
   for (const mod of modules) {
     for (const param of mod.params) {
-      entries.push({
-        id: paramId,
-        value: normalizeParam(param.value, param.min, param.max),
-      });
-      paramId++;
+      values.push(normalizeParam(param.value, param.min, param.max));
     }
   }
-  return entries;
+  return values;
 }
 
-function injectParams(template: number[], modules: PresetModule[]): number[] {
-  const entries = collectParamEntries(modules);
-  const result = [...template];
+function buildPresetBytes(preset: GeneratedPreset): Uint8Array {
+  const factoryTemplateBytes = decodeTemplate();
+  const targetBuffer = new Uint8Array(factoryTemplateBytes);
 
+  const nameBytes = encodeString(preset.title).slice(
+    0,
+    PRESET_NAME_END - PRESET_NAME_START + 1,
+  );
+  for (let i = 0; i < nameBytes.length; i++) {
+    targetBuffer[PRESET_NAME_START + i] = nameBytes[i];
+  }
+
+  const paramValues = collectParamEntries(preset.modules);
   const tableLen = PARAM_TABLE_END - PARAM_TABLE_START + 1;
-  const numEntries = Math.min(entries.length, Math.floor(tableLen / PARAM_ENTRY_SIZE));
+  const numEntries = Math.min(paramValues.length, Math.floor(tableLen / PARAM_ENTRY_SIZE));
 
   for (let i = 0; i < numEntries; i++) {
     const offset = PARAM_TABLE_START + i * PARAM_ENTRY_SIZE;
-    result[offset] = entries[i].value;
+    targetBuffer[offset] = paramValues[i];
   }
 
-  return result;
-}
-
-function writeFixedString(
-  template: number[],
-  start: number,
-  end: number,
-  str: string,
-): void {
-  const fieldLen = end - start + 1;
-  const encoded = encodeString(str).slice(0, fieldLen);
-  for (let i = 0; i < fieldLen; i++) {
-    template[start + i] = i < encoded.length ? encoded[i] : 0;
-  }
-}
-
-function computeChecksum(bytes: number[]): number {
   let sum = 0;
   for (let i = 0; i <= CHECKSUM_COVERAGE_END; i++) {
-    sum = (sum + bytes[i]) & 0xff;
+    sum = (sum + targetBuffer[i]) & 0xff;
   }
-  return sum;
-}
+  targetBuffer[CHECKSUM_BYTE_INDEX] = sum;
 
-function buildPresetBytes(preset: GeneratedPreset): number[] {
-  const template = decodeTemplate();
-  const result = [...template];
-
-  writeFixedString(result, PRESET_NAME_START, PRESET_NAME_END, preset.title);
-  const ampName = preset.modules[0]?.fxTitle ?? 'I PRO';
-  writeFixedString(result, AMP_NAME_START, AMP_NAME_END, ampName);
-  const category = preset.modules[0]?.type ?? 'Rock';
-  writeFixedString(result, CATEGORY_START, CATEGORY_END, category);
-
-  injectParams(result, preset.modules);
-
-  result[CHECKSUM_BYTE_INDEX] = computeChecksum(result);
-
-  return result;
-}
-
-function bytesToBase64(bytes: number[]): string {
-  const uint8 = new Uint8Array(bytes);
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < uint8.length; i += chunk) {
-    binary += String.fromCharCode(...uint8.subarray(i, i + chunk));
-  }
-  return btoa(binary);
+  return targetBuffer;
 }
 
 export function downloadPreset(preset: GeneratedPreset): void {
-  const bytes = buildPresetBytes(preset);
-  const arrayLiteral = JSON.stringify(bytes);
+  const targetBuffer = buildPresetBytes(preset);
+  const intArray = Array.from(targetBuffer);
+  const arrayLiteral = JSON.stringify(intArray);
   const base64 = btoa(arrayLiteral);
 
   const blob = new Blob([base64], { type: 'text/plain' });
