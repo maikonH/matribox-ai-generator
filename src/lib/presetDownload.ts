@@ -96,6 +96,22 @@ function bytesToBase64(bytes: number[]): string {
   return btoa(binary);
 }
 
+export function downloadRawTemplate(): void {
+  const bytes = decodeTemplate();
+  const arrayLiteral = JSON.stringify(bytes);
+  const base64 = btoa(arrayLiteral);
+
+  const blob = new Blob([base64], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'factory_template_original.prst';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export function downloadPreset(preset: GeneratedPreset): void {
   const bytes = buildPresetBytes(preset);
   const arrayLiteral = JSON.stringify(bytes);

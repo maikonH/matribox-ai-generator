@@ -7,7 +7,7 @@ import ToastContainer from './components/ToastContainer';
 import { useToasts } from './hooks/useToasts';
 import { loadAlgorithms } from './lib/algorithmStore';
 import { generatePreset } from './lib/gemini';
-import { downloadPreset } from './lib/presetDownload';
+import { downloadPreset, downloadRawTemplate } from './lib/presetDownload';
 import type { Algorithm, GeneratedPreset } from './lib/types';
 
 export default function App() {
@@ -90,6 +90,11 @@ export default function App() {
     }
   }, [preset, showToast]);
 
+  const handleDownloadRawTemplate = useCallback(() => {
+    downloadRawTemplate();
+    showToast('Template original exportado para teste.', 'success');
+  }, [showToast]);
+
   return (
     <div className="min-h-screen bg-[#030712] text-slate-200">
       <Header algCount={algorithms.length} onOpenSettings={() => setSettingsOpen(true)} />
@@ -118,6 +123,7 @@ export default function App() {
           loading={loading}
           onParamChange={handleParamChange}
           onDownload={handleDownload}
+          onDownloadRawTemplate={handleDownloadRawTemplate}
         />
       </main>
 
