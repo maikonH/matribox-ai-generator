@@ -25,18 +25,20 @@ function clampInt(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(v)));
 }
 
-function buildPresetBuffer(preset: GeneratedPreset): number[] {
+function buildPresetBuffer(_preset: GeneratedPreset): number[] {
   // Clone the frozen factory template as plain numbers (NOT Uint8Array —
   // that would truncate the float at index 65 and break the device).
   const buffer = decodeTemplate().slice();
 
-  const fieldLen = PRESET_NAME_END - PRESET_NAME_START + 1;
-  const nameBytes = encodeString(preset.title).slice(0, fieldLen);
-  for (let i = 0; i < fieldLen; i++) {
-    buffer[PRESET_NAME_START + i] = nameBytes[i] ?? 0;
-  }
+  // --- ISOLATION TEST: name left exactly as factory ("Matribox II PRO") ---
+  // const fieldLen = PRESET_NAME_END - PRESET_NAME_START + 1;
+  // const nameBytes = encodeString(preset.title).slice(0, fieldLen);
+  // for (let i = 0; i < fieldLen; i++) {
+  //   buffer[PRESET_NAME_START + i] = nameBytes[i] ?? 0;
+  // }
 
-  buffer[GAIN_BYTE] = clampInt(preset.volume, 0, 100);
+  // Only the gain byte is changed, using a fixed safe value for this test.
+  buffer[GAIN_BYTE] = 80;
 
   return buffer;
 }
