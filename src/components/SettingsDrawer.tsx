@@ -1,8 +1,8 @@
 import { useState, useRef, useCallback } from 'react';
 import type { Algorithm } from '../lib/types';
 import { validateAlgData } from '../lib/jsonValidator';
-import { saveAlgorithms, getCategorized } from '../lib/algorithmStore';
-import { loadApiKey, saveApiKey } from '../lib/apiKeyStore';
+import { saveAlgorithmsAsync, clearAlgorithmsAsync, getCategorized } from '../lib/algorithmStore';
+import { loadApiKey, saveApiKey, hasEnvApiKey } from '../lib/apiKeyStore';
 import { X, UploadCloud, FileJson, Check, AlertTriangle, Database, Trash2, Key, Eye, EyeOff } from 'lucide-react';
 
 interface Props {
@@ -33,15 +33,20 @@ export default function SettingsDrawer({
   const handleFile = useCallback(
     (file: File) => {
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         const text = e.target?.result as string;
         const result = validateAlgData(text);
         if (result.success) {
-          saveAlgorithms(result.algorithms);
-          onAlgorithmsChanged(result.algorithms);
-          setPreviewCount(result.count);
-          setPreviewError(null);
-          onToast(`${result.count} algoritmos carregados e salvos!`, 'success');
+          try {
+            await saveAlgorithmsAsync(result.algorithms);
+            onAlgorithmsChanged(result.algorithms);
+            setPreviewCount(result.count);
+            setPreviewError(null);
+            onToast(`${result.count} algoritmos carregados e salvos no IndexedDB!`, 'success');
+          } catch {
+            setPreviewError('Falha ao salvar no IndexedDB.');
+            onToast('Falha ao salvar no IndexedDB.', 'error');
+          }
         } else {
           setPreviewError(result.error || 'Erro ao processar arquivo.');
           setPreviewCount(null);
@@ -71,8 +76,8 @@ export default function SettingsDrawer({
     [handleFile, onToast],
   );
 
-  const handleReset = () => {
-    localStorage.removeItem('matribox_algorithms');
+  const handleReset = async () => {
+    await clearAlgorithmsAsync();
     onAlgorithmsChanged([]);
     setPreviewCount(null);
     setPreviewError(null);
@@ -143,8 +148,14 @@ export default function SettingsDrawer({
                   Chave salva no navegador
                 </div>
               )}
+              {hasEnvApiKey() && !apiKey && (
+                <div className="flex items-center gap-2 text-xs text-sky-300 bg-sky-500/10 border border-sky-500/30 rounded-lg px-3 py-2">
+                  <Check className="w-3.5 h-3.5" />
+                  Chave encontrada no .env (VITE_GEMINI_API_KEY) — já ativa no boot.
+                </div>
+              )}
               <p className="text-slate-600 text-xs">
-                A chave fica armazenada apenas localmente no navegador e nunca é enviada a terceiros.
+                A chave do navegador tem prioridade; sem ela, a chave do .env é usada automaticamente. Nunca é enviada a terceiros.
               </p>
             </div>
           </section>

@@ -5,7 +5,7 @@ import PromptBar from './components/PromptBar';
 import PresetCard from './components/PresetCard';
 import ToastContainer from './components/ToastContainer';
 import { useToasts } from './hooks/useToasts';
-import { loadAlgorithms } from './lib/algorithmStore';
+import { loadAlgorithmsAsync } from './lib/algorithmStore';
 import { generatePreset } from './lib/gemini';
 import { downloadPreset, downloadRawTemplate } from './lib/presetDownload';
 import type { Algorithm, GeneratedPreset } from './lib/types';
@@ -19,8 +19,12 @@ export default function App() {
   const { toasts, showToast, dismiss } = useToasts();
 
   useEffect(() => {
-    const loaded = loadAlgorithms();
-    setAlgorithms(loaded);
+    let cancelled = false;
+    (async () => {
+      const loaded = await loadAlgorithmsAsync();
+      if (!cancelled) setAlgorithms(loaded);
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const handleGenerate = useCallback(async () => {

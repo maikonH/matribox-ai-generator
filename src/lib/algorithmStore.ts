@@ -1,28 +1,48 @@
 import type { Algorithm, AlgorithmCategory } from './types';
 import { mockAlgorithms } from '../data/mockAlgorithms';
+import { dbGetAlgorithms, dbSetAlgorithms, dbClearAlgorithms } from './algorithmDb';
 
 const STORAGE_KEY = 'matribox_algorithms';
 
-export function loadAlgorithms(): Algorithm[] {
+/**
+ * Load algorithms from IndexedDB. Falls back to localStorage (legacy migration)
+ * and finally to mockAlgorithms on first boot. Migrates any localStorage data
+ * into IndexedDB and removes the legacy entry.
+ */
+export async function loadAlgorithmsAsync(): Promise<Algorithm[]> {
+  const fromDb = await dbGetAlgorithms<Algorithm[]>();
+  if (fromDb && Array.isArray(fromDb) && fromDb.length > 0) return fromDb;
+
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    const legacy = localStorage.getItem(STORAGE_KEY);
+    if (legacy) {
+      const parsed = JSON.parse(legacy);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        await dbSetAlgorithms(parsed);
+        localStorage.removeItem(STORAGE_KEY);
+        return parsed;
+      }
     }
   } catch {
-    // fall through to mock
+    // ignore malformed legacy data
   }
-  saveAlgorithms(mockAlgorithms);
+
+  await dbSetAlgorithms(mockAlgorithms);
   return mockAlgorithms;
 }
 
-export function saveAlgorithms(algorithms: Algorithm[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(algorithms));
+export async function saveAlgorithmsAsync(algorithms: Algorithm[]): Promise<void> {
+  await dbSetAlgorithms(algorithms);
 }
 
-export function clearAlgorithms(): void {
+export async function clearAlgorithmsAsync(): Promise<void> {
+  await dbClearAlgorithms();
   localStorage.removeItem(STORAGE_KEY);
+}
+
+/** @deprecated Use loadAlgorithmsAsync. Kept for backward compatibility. */
+export function loadAlgorithms(): Algorithm[] {
+  return mockAlgorithms;
 }
 
 export function getCategorized(algorithms: Algorithm[]): AlgorithmCategory[] {

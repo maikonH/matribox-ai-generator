@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { Algorithm, GeneratedPreset } from './types';
 import { findAlgorithm } from './algorithmStore';
-import { loadApiKey } from './apiKeyStore';
+import { getEffectiveApiKey } from './apiKeyStore';
 
 const MODEL_NAME = 'gemini-3.1-flash-lite';
 
@@ -94,9 +94,9 @@ export async function generatePreset(
   userPrompt: string,
   algorithms: Algorithm[],
 ): Promise<GeneratedPreset> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || loadApiKey();
+  const apiKey = getEffectiveApiKey();
   if (!apiKey) {
-    throw new Error('Chave do Gemini não configurada. Abra Settings e adicione sua chave da API Gemini.');
+    throw new Error('Chave do Gemini não configurada. Abra Settings e adicione sua chave da API Gemini, ou defina VITE_GEMINI_API_KEY no .env.');
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
