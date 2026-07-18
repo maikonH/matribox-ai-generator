@@ -71,8 +71,12 @@ function applyFxIds(buffer: number[], ampFxId?: string, cabFxId?: string): void 
   if (ampFxId && /^\d+$/.test(ampFxId)) {
     writeU32LE(buffer, AMP_FXID_POS, Number(ampFxId));
   }
+  // CAB fxId is stored with a 0xbc marker in the high byte (byte 3) instead of
+  // the real 0x0a. Only overwrite the low byte at offset 167; bytes 168-170
+  // stay as 00 00 bc from the template. Overwriting byte 170 with 0x0a corrupts
+  // the marker and the Matribox ignores the CAB change.
   if (cabFxId && /^\d+$/.test(cabFxId)) {
-    writeU32LE(buffer, CAB_FXID_POS, Number(cabFxId));
+    buffer[CAB_FXID_POS] = Number(cabFxId) & 0xff;
   }
 }
 
