@@ -1,25 +1,49 @@
 import type { GeneratedPreset, PresetModule } from './types';
+import templateRaw from '../data/amp+cab/60-A_twd_deluxe.prst?raw';
 
-// Factory template: the 33-A LE MARSHALL preset as a number array. A valid
-// .prst file that loads on the Matribox II Pro. We mutate ONLY the name
-// field, the module declaration blocks (algorithm ID + enable flag), and the
-// float32-LE parameter slots below — every other byte (header, prefix,
-// routing gaps, footer) is preserved verbatim from this pristine template.
+// Factory template: the compact 295-byte 60-A_twd_deluxe.prst — an amp+cab-only
+// preset that loads on the Matribox II Pro. We mutate ONLY the name field, the
+// amp + cab fxIds, and inject a 42-byte AMP parameter section (6 Float32 LE
+// values + separators) right before the existing CAB parameter section. Every
+// other byte (header, module declarations, routing, footer) is preserved
+// verbatim from this pristine template.
 //
-// This single template is used for BOTH paths (with and without a base
-// preset). When a base preset is selected, the amp + cab fxIds from the
-// base preset override the AI's choices in the module declaration blocks,
-// and the amp param values are injected into the float32 slots at
-// offsets 216–232.
-const TEMPLATE_B64 =
-  'WzMsMiwwLDAsMTYsMTEsMCwxMjgsMCw1LDEsNCwzLDEyLDEsNSwxLDE1LDEwNSwyLDEwNSwxNjQsMiwwLDIsMSw1NCw1MiwyMjIsNzcsNzYsNjksMzIsNzcsNjUsODIsODMsNzIsNjUsNzYsNzYsMCwwLDgyLDc5LDEzMiwzLDIsNTMsMTY5LDEzNiwxMTMsNTQsMTA4LDAsMSw1NSwxNDQsMTY3LDU0LDEwOCwwLDEsMjQ2LDI0OSwyNTUsNTMsMTA4LDAsMSwxMTYsMTI0LDI1MCw1NCwxMDgsMCwxLDE0NCwyMTgsMjUzLDU0LDEwOCwwLDEsMjU0LDI0OSw5NSw1NCwxMDgsMCwxLDE4OCw3LDE1Miw1NCwxMDgsMCwxLDEyMCwxMTYsOTYsMTgwLDExMCwwLDg4LDUwLDE1Niw4LDE0NCwwLDk3LDE0LDEwLDE2NCwxLDQsMSwyNTUsMjU1LDEzLDAsMCwwLDEwMSwyLDE1LDEzMiwyLDEwLDMsMSwxLDIsMyw4LDAsMCwwLDcsNSwwLDYsMTIxLDIsNzYsMTUyLDIsNyw0LDEsMSw1LDAsMiw0LDYsMywyNTUsOTYsMCw0LDExLDAsNywxMCwxNSwzLDksMTA0LDEsMCwxMSwyNTUsMiwwLDAsMTUsMjcsMCwwLDAsNTcsMCwwLDEsMywwLDAsMTIsMywwLDAsNiwzMCwwLDAsMywyOSwwLDAsMTEsMTM2LDcsNDUsMTYsMCwxMTAsMTAsMjMwLDIsMTEyLDIsMCw0LDUsMSwwLDAsMTEyLDY2LDAsMCwxNDgsNjYsMCwwLDEyMCw2NiwwLDAsMTYsNjYsMCwwLDIwLDY2LDEwMCwzLDMyLDUsMTIsMCwyLDIyNCw2NSwwLDAsMTYwLDIwNCwwLDcsNzIsNjcsMCwwLDI1MCw2NywwLDAsNzIsNjYsMTcyLDAsMzIsNSw0LDEsOSwwLDAsMTI4LDE5MiwwLDAsODAsMTkzLDAsMCwxNjAsMTkzLDMyLDksMjIwLDAsNyw5Niw2NSwwLDAsMTM4LDY2LDAsMCwxOTIsNjUsNDAsMTQ4LDEsMywyMDAsNjYsMCwwLDEyOCw2Myw0MCw2MCwwLDU0LDM2LDAsMTI0LDQsNTQsMTA4LDAsNjIsOTIsMCwxMSwzMiw2NiwwLDAsMTM2LDY1LDAsMCwzNiw2NiwwLDAsMjQ4LDY1LDMyLDUsMTg4LDEsMjM3LDEwLDE2LDEyNCw1LDQsNjQsMCwwLDIyNCw2NCwwLDAsMjM2LDE2LDEwOCwzNywxMDgsMjIsMTA4LDAsMjUyLDQsMzIsMywyOSwwLDk2LDMyLDEwLDE3Miw0LDEwOCw1MiwxMDksMTAsNTYsMzIsMTAsOTIsNywxMjQsNSwzMiwxNDksMTMsMCwxLDEyOCwwLDE3NSwyMyw3OCwwLDgwLDE5MywxMDcsOTUsMTMxLDIsNywxLDAsMTU2LDEwMSwxMTIsMCwxMjgsMiwzMiw5LDE2LDAsOTYsNTQsNjAsMTIsMCwxMTMsMTA2LDY5LDEyOCwxMCw0LDgsMSwxNDksNTQsMTcwLDE0OCwxNDksMTQwLDEsNDIsMTcsMCwxLDU1LDQ4LDAsNDIsOTYsMCwxNDAsMSwwLDIsMiwwLDAsMTYsMTIsMCwwLDAsMCwwLDksMSwwLDAsMTI4LDYzLDIwMCwwLDAsNDgsMTcsMCwwXQ==';
+// Compact template layout (295 bytes):
+//   [0-47]    Header (identical across all compact templates)
+//   [48-103]  Module declaration blocks (8 blocks of 7 bytes)
+//   [104-159] Routing data
+//   [160]     0xFF marker
+//   [161-164] Amp fxId (4-byte LE)
+//   [165]     Cab fxId low byte (high bytes are always 0x0A0000xx)
+//   [168-176] Constant data (ends with 6e 0a)
+//   [177-183] CAB section header: e6 02 6c 04 03 05 01
+//   [184-187] CAB Volume (float32 LE = 50.0)
+//   [201-204] CAB Low Cut (float32 LE ≈ 19.0)
+//   [205-208] CAB High Cut (float32 LE = 20001.0)
+//   [279-294] Footer (identical across all compact templates)
+//
+// The compact template has NO amp param section — only CAB params. We INSERT
+// a 42-byte AMP param block at offset 177 (before the CAB e6 02 header),
+// shifting all subsequent bytes. The header has no length fields, so the
+// insertion is safe. The injected AMP block structure (derived from the
+// user-created 40-C_teste_bolt.prst which works on the device):
+//   e6 02 64 01 07 05 01       (7-byte AMP section header + routing)
+//   [Gain f32 LE]              (4 bytes)
+//   [Presence f32 LE]          (4 bytes)
+//   74 01 20 11 0c             (5-byte separator)
+//   [Volume f32 LE]            (4 bytes)
+//   [Bass f32 LE]              (4 bytes)
+//   [Middle f32 LE]            (4 bytes)
+//   [Treble f32 LE]            (4 bytes)
+//   00 00                      (2 bytes)
+//   7c 01 20 07                (4-byte separator before CAB section)
+//   = 42 bytes total
 
-// Name text occupies offsets [30..44] (15 bytes). The 4-byte prefix at
-// [26..29] belongs to the preset header and must stay untouched.
+const TEMPLATE_B64 = templateRaw.trim();
+
 const NAME_START = 30;
 const NAME_END = 44;
 
-// Module declaration blocks: 8 blocks of 7 bytes starting at offset 48.
 const MODULE_DECL_START = 48;
 const MODULE_DECL_COUNT = 8;
 const MODULE_DECL_SIZE = 7;
@@ -29,45 +53,35 @@ const MODULE_DECL_SIZE = 7;
 // Template slots: 0=DRIVE, 1=CAB, 2=AMP, 3=EQ, 4=MOD, 5=DELAY, 6=REVERB, 7=VOLUME
 const SLOT_MAP = [0, 2, 1, 3, 4, 5, 6, 7];
 
-// AI module indices for AMP and CAB — used to override with base preset fxIds.
 const AMP_MODULE_IDX = 1;
 const CAB_MODULE_IDX = 2;
 
-interface ParamSlot {
-  pos: number;
-  moduleIdx: number;
-  paramIdx: number;
-  isSwitch?: boolean;
-}
+// Position in the pristine (pre-insertion) template where the amp fxId begins
+// (right after the 0xFF marker at offset 160).
+const AMP_FXID_POS = 161;
+const CAB_FXID_LOW_POS = 165;
 
-// Amp param slots (moduleIdx=1, the AMP module). These are Float32 LE values
-// at 4-byte-aligned offsets in the template. The standard knob order on the
-// device screen is: Gain, Presence, Volume, Bass, Middle, Treble.
-// The template stores 5 of the 6 amp params as float32; the 6th (Treble) is
-// not present in this template and uses the device default.
-const AMP_PARAM_SLOTS: ParamSlot[] = [
-  { pos: 216, moduleIdx: 1, paramIdx: 0 }, // Gain
-  { pos: 220, moduleIdx: 1, paramIdx: 1 }, // Presence
-  { pos: 224, moduleIdx: 1, paramIdx: 2 }, // Volume
-  { pos: 228, moduleIdx: 1, paramIdx: 3 }, // Bass
-  { pos: 232, moduleIdx: 1, paramIdx: 4 }, // Middle
-];
+// Offset where we insert the 42-byte AMP param block (just before the CAB
+// section's e6 02 header at offset 177).
+const AMP_INSERT_POS = 177;
 
-const PARAM_SLOTS: ParamSlot[] = [
-  ...AMP_PARAM_SLOTS,
-  { pos: 253, moduleIdx: 5, paramIdx: 0 },
-  { pos: 257, moduleIdx: 5, paramIdx: 1 },
-  { pos: 268, moduleIdx: 3, paramIdx: 0 },
-  { pos: 272, moduleIdx: 3, paramIdx: 1 },
-  { pos: 276, moduleIdx: 3, paramIdx: 2 },
-  { pos: 287, moduleIdx: 4, paramIdx: 0 },
-  { pos: 291, moduleIdx: 4, paramIdx: 1 },
-  { pos: 301, moduleIdx: 4, paramIdx: 2, isSwitch: true },
-  { pos: 322, moduleIdx: 6, paramIdx: 0 },
-  { pos: 326, moduleIdx: 6, paramIdx: 1 },
-  { pos: 330, moduleIdx: 6, paramIdx: 2 },
-  { pos: 345, moduleIdx: 6, paramIdx: 3 },
-];
+// Size of the AMP param block we insert.
+const AMP_BLOCK_SIZE = 42;
+
+// After insertion, the amp param float32 slots sit at these offsets:
+const AMP_GAIN_POS = AMP_INSERT_POS + 7; // 184
+const AMP_PRESENCE_POS = AMP_GAIN_POS + 4; // 188
+const AMP_SEPARATOR = [0x74, 0x01, 0x20, 0x11, 0x0c]; // 5 bytes at 192
+const AMP_VOLUME_POS = AMP_GAIN_POS + 4 + 5; // 197
+const AMP_BASS_POS = AMP_VOLUME_POS + 4; // 201
+const AMP_MIDDLE_POS = AMP_BASS_POS + 4; // 205
+const AMP_TREBLE_POS = AMP_MIDDLE_POS + 4; // 209
+
+// The AMP section header (7 bytes) + trailing separator (6 bytes) that
+// bracket the amp params. These are fixed bytes copied from the working
+// 40-C_teste_bolt.prst preset.
+const AMP_SECTION_HEADER = [0xe6, 0x02, 0x64, 0x01, 0x07, 0x05, 0x01];
+const AMP_TRAILING_SEPARATOR = [0x00, 0x00, 0x7c, 0x01, 0x20, 0x07];
 
 function decodeTemplate(): number[] {
   return JSON.parse(atob(TEMPLATE_B64));
@@ -135,19 +149,61 @@ function applyModules(buffer: number[], modules: PresetModule[]): void {
   }
 }
 
-function applyParams(buffer: number[], preset: GeneratedPreset): void {
-  for (const slot of PARAM_SLOTS) {
-    const mod = preset.modules[slot.moduleIdx];
-    if (!mod) continue;
-    const param = mod.params[slot.paramIdx];
-    if (!param) continue;
-
-    const value = clamp(param.value, param.min, param.max);
-    const out = slot.isSwitch
-      ? value > (param.min + param.max) / 2 ? 1.0 : 0.0
-      : value;
-    writeFloatLE(buffer, slot.pos, out);
+function applyFxIds(buffer: number[], ampFxId?: string, cabFxId?: string): void {
+  if (ampFxId && /^\d+$/.test(ampFxId)) {
+    const n = (Number(ampFxId) >>> 0);
+    buffer[AMP_FXID_POS] = n & 0xff;
+    buffer[AMP_FXID_POS + 1] = (n >>> 8) & 0xff;
+    buffer[AMP_FXID_POS + 2] = (n >>> 16) & 0xff;
+    buffer[AMP_FXID_POS + 3] = (n >>> 24) & 0xff;
   }
+  if (cabFxId && /^\d+$/.test(cabFxId)) {
+    const n = (Number(cabFxId) >>> 0);
+    buffer[CAB_FXID_LOW_POS] = n & 0xff;
+  }
+}
+
+function insertAmpParamBlock(buffer: number[]): number[] {
+  const block: number[] = [];
+  block.push(...AMP_SECTION_HEADER);
+  // 4 bytes for Gain (placeholder, filled later)
+  block.push(0, 0, 0, 0);
+  // 4 bytes for Presence
+  block.push(0, 0, 0, 0);
+  // 5-byte separator
+  block.push(...AMP_SEPARATOR);
+  // 4 bytes for Volume
+  block.push(0, 0, 0, 0);
+  // 4 bytes for Bass
+  block.push(0, 0, 0, 0);
+  // 4 bytes for Middle
+  block.push(0, 0, 0, 0);
+  // 4 bytes for Treble
+  block.push(0, 0, 0, 0);
+  // Trailing separator
+  block.push(...AMP_TRAILING_SEPARATOR);
+
+  return [...buffer.slice(0, AMP_INSERT_POS), ...block, ...buffer.slice(AMP_INSERT_POS)];
+}
+
+function applyAmpParams(buffer: number[], preset: GeneratedPreset): void {
+  const ampModule = preset.modules[AMP_MODULE_IDX];
+  if (!ampModule) return;
+
+  const params = ampModule.params;
+  const gain = params[0];
+  const presence = params[1];
+  const volume = params[2];
+  const bass = params[3];
+  const middle = params[4];
+  const treble = params[5];
+
+  if (gain) writeFloatLE(buffer, AMP_GAIN_POS, clamp(gain.value, gain.min, gain.max));
+  if (presence) writeFloatLE(buffer, AMP_PRESENCE_POS, clamp(presence.value, presence.min, presence.max));
+  if (volume) writeFloatLE(buffer, AMP_VOLUME_POS, clamp(volume.value, volume.min, volume.max));
+  if (bass) writeFloatLE(buffer, AMP_BASS_POS, clamp(bass.value, bass.min, bass.max));
+  if (middle) writeFloatLE(buffer, AMP_MIDDLE_POS, clamp(middle.value, middle.min, middle.max));
+  if (treble) writeFloatLE(buffer, AMP_TREBLE_POS, clamp(treble.value, treble.min, treble.max));
 }
 
 function buildPresetBuffer(
@@ -155,23 +211,12 @@ function buildPresetBuffer(
   baseAmpFxId?: string,
   baseCabFxId?: string,
 ): number[] {
-  const buffer = decodeTemplate();
+  let buffer = decodeTemplate();
   applyName(buffer, preset.title);
-
-  // When a base preset is selected, override the AMP and CAB module fxIds
-  // with the base preset's algorithms so the downloaded .prst preserves the
-  // exact amp + cab the user picked, regardless of what the AI returned.
-  let modules = preset.modules;
-  if (baseAmpFxId) {
-    modules = modules.map((mod, i) => {
-      if (i === AMP_MODULE_IDX) return { ...mod, fxId: baseAmpFxId };
-      if (i === CAB_MODULE_IDX && baseCabFxId) return { ...mod, fxId: baseCabFxId };
-      return mod;
-    });
-  }
-
-  applyModules(buffer, modules);
-  applyParams(buffer, { ...preset, modules });
+  applyModules(buffer, preset.modules);
+  applyFxIds(buffer, baseAmpFxId, baseCabFxId);
+  buffer = insertAmpParamBlock(buffer);
+  applyAmpParams(buffer, preset);
   return buffer;
 }
 

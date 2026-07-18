@@ -1,10 +1,11 @@
 // Dynamic base tone presets. The full amp + cab catalog is read from
 // alg_data.json so every algorithm the device knows about is available — no
-// manual curation required. The actual .prst byte assembly (name, module
-// declaration blocks, float32 param slots) lives in presetDownload.ts, which
-// uses a single factory template for both the base-preset and AI-only paths.
+// manual curation required. The actual .prst byte assembly (name, amp + cab
+// fxIds) lives in buildBasePresetBytes below, which uses the compact 295-byte
+// 60-A_twd_deluxe.prst template that loads cleanly on the Matribox II Pro.
 
 import algData from '../data/alg_data.json';
+import templateRaw from '../data/amp+cab/60-A_twd_deluxe.prst?raw';
 
 export interface BasePreset {
   id: string;
@@ -78,4 +79,56 @@ export const basePresets: BasePreset[] = buildBasePresets();
 
 export function getBasePreset(id: string): BasePreset | undefined {
   return basePresets.find((p) => p.id === id);
+}
+
+// --- Compact template byte assembly ---------------------------------------
+
+const TEMPLATE_B64 = templateRaw.trim();
+
+const NAME_START = 30;
+const NAME_END = 44;
+const AMP_FXID_POS = 161;
+const CAB_FXID_LOW_POS = 165;
+
+function decodeTemplate(): number[] {
+  return JSON.parse(atob(TEMPLATE_B64));
+}
+
+function encodeString(str: string): number[] {
+  return Array.from(new TextEncoder().encode(str));
+}
+
+/**
+ * Build the base preset bytes from the compact 60-A_twd_deluxe.prst template.
+ * Injects the preset name, the amp fxId (4-byte LE at offset 161) and the cab
+ * fxId low byte (offset 165). The compact template has no amp param section —
+ * amp params are injected separately in presetDownload.ts.
+ */
+export function buildBasePresetBytes(
+  title: string,
+  ampFxId: string,
+  cabFxId: string,
+): number[] {
+  const buffer = decodeTemplate();
+
+  const fieldLen = NAME_END - NAME_START + 1;
+  const nameBytes = encodeString(title).slice(0, fieldLen);
+  for (let i = 0; i < fieldLen; i++) {
+    buffer[NAME_START + i] = nameBytes[i] ?? 0;
+  }
+
+  if (ampFxId && /^\d+$/.test(ampFxId)) {
+    const n = Number(ampFxId) >>> 0;
+    buffer[AMP_FXID_POS] = n & 0xff;
+    buffer[AMP_FXID_POS + 1] = (n >>> 8) & 0xff;
+    buffer[AMP_FXID_POS + 2] = (n >>> 16) & 0xff;
+    buffer[AMP_FXID_POS + 3] = (n >>> 24) & 0xff;
+  }
+
+  if (cabFxId && /^\d+$/.test(cabFxId)) {
+    const n = Number(cabFxId) >>> 0;
+    buffer[CAB_FXID_LOW_POS] = n & 0xff;
+  }
+
+  return buffer;
 }
