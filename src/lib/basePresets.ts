@@ -88,7 +88,7 @@ const TEMPLATE_B64 = templateRaw.trim();
 const NAME_START = 30;
 const NAME_END = 44;
 const AMP_FXID_POS = 163;
-const CAB_FXID_LOW_POS = 167;
+const CAB_FXID_POS = 167;
 
 function decodeTemplate(): number[] {
   return JSON.parse(atob(TEMPLATE_B64));
@@ -101,7 +101,7 @@ function encodeString(str: string): number[] {
 /**
  * Build the base preset bytes from the fixed 57-A_amp_com_botoes.p.prst
  * template. Overwrites the preset name (offset 30), amp fxId (4-byte LE at
- * offset 163) and cab fxId low byte (offset 167) in place. The file size
+ * offset 163) and cab fxId (4-byte LE at offset 167) in place. The file size
  * never changes.
  */
 export function buildBasePresetBytes(
@@ -127,7 +127,10 @@ export function buildBasePresetBytes(
 
   if (cabFxId && /^\d+$/.test(cabFxId)) {
     const n = Number(cabFxId) >>> 0;
-    buffer[CAB_FXID_LOW_POS] = n & 0xff;
+    buffer[CAB_FXID_POS] = n & 0xff;
+    buffer[CAB_FXID_POS + 1] = (n >>> 8) & 0xff;
+    buffer[CAB_FXID_POS + 2] = (n >>> 16) & 0xff;
+    buffer[CAB_FXID_POS + 3] = (n >>> 24) & 0xff;
   }
 
   return buffer;

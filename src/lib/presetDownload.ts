@@ -12,7 +12,7 @@ import templateRaw from '../lib/57-A_amp_com_botoes.p.prst?raw';
 //   [30..44]    Name (15 bytes, null-padded)
 //   [162]       0xFF marker
 //   [163..166]  Amp fxId (4-byte LE)
-//   [167]       Cab fxId low byte (high bytes always 0x0A0000xx)
+//   [167..170]  Cab fxId (4-byte LE)
 //   [179..186]  AMP param section header: e6 02 6c 04 00 08 05 01
 //   [187..190]  Gain   (float32 LE)
 //   [191..194]  Presence (float32 LE)
@@ -43,7 +43,7 @@ const AMP_MODULE_IDX = 1;
 const CAB_MODULE_IDX = 2;
 
 const AMP_FXID_POS = 163;
-const CAB_FXID_LOW_POS = 167;
+const CAB_FXID_POS = 167;
 
 const AMP_PARAM_OFFSETS = [187, 191, 195, 199, 203, 207];
 
@@ -68,14 +68,6 @@ function writeFloatLE(buffer: number[], pos: number, value: number): void {
   }
 }
 
-function signatureFromFxId(fxId: string): [number, number, number] | null {
-  if (!/^\d+$/.test(fxId)) return null;
-  const n = Number(fxId);
-  if (!Number.isFinite(n) || n <= 0 || n > 0xffffffff) return null;
-  const n32 = n >>> 0;
-  return [(n32 >>> 24) & 0xff, (n32 >>> 16) & 0xff, n32 & 0xff];
-}
-
 function applyName(buffer: number[], title: string): void {
   const fieldLen = NAME_END - NAME_START + 1;
   const nameBytes = encodeString(title).slice(0, fieldLen);
@@ -95,13 +87,6 @@ function applyModules(buffer: number[], modules: PresetModule[]): void {
     const base = MODULE_DECL_START + slot * MODULE_DECL_SIZE;
 
     buffer[base] = mod.enabled === false ? 0 : 1;
-
-    const sig = signatureFromFxId(mod.fxId);
-    if (sig) {
-      buffer[base + 1] = sig[0];
-      buffer[base + 2] = sig[1];
-      buffer[base + 3] = sig[2];
-    }
 
     usedSlots.add(slot);
   }
@@ -123,7 +108,10 @@ function applyFxIds(buffer: number[], ampFxId?: string, cabFxId?: string): void 
   }
   if (cabFxId && /^\d+$/.test(cabFxId)) {
     const n = (Number(cabFxId) >>> 0);
-    buffer[CAB_FXID_LOW_POS] = n & 0xff;
+    buffer[CAB_FXID_POS] = n & 0xff;
+    buffer[CAB_FXID_POS + 1] = (n >>> 8) & 0xff;
+    buffer[CAB_FXID_POS + 2] = (n >>> 16) & 0xff;
+    buffer[CAB_FXID_POS + 3] = (n >>> 24) & 0xff;
   }
 }
 
