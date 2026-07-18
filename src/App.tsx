@@ -104,7 +104,7 @@ export default function App() {
   const handleDownload = useCallback(() => {
     if (preset) {
       const base = getBasePreset(selectedBaseId ?? '');
-      downloadPreset(preset, base?.bytes);
+      downloadPreset(preset, base?.ampFxId);
       showToast('Download do preset iniciado.', 'success');
     }
   }, [preset, selectedBaseId, showToast]);

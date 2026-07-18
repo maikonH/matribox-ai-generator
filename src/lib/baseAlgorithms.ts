@@ -1,4 +1,4 @@
-// Algorithm definitions for the 10 amp + cab base tones, extracted from
+// Algorithm definitions for all amp + cab algorithms, extracted directly from
 // alg_data.json. These are always available to the AI even before the user
 // uploads alg_data.json, so a base tone can drive generation on first boot.
 
@@ -24,6 +24,12 @@ type AlgEntry = {
   widget?: Widget[];
 };
 
+type AlgModule = {
+  name: string;
+  index: number;
+  alg: AlgEntry[];
+};
+
 function num(v: string | number | undefined, fallback: number): number {
   if (v === undefined) return fallback;
   const n = typeof v === 'number' ? v : parseFloat(v);
@@ -44,7 +50,7 @@ function widgetToParams(widget: Widget[] | undefined): AlgorithmParam[] {
 
 function findAlgEntry(fxId: string): AlgEntry | undefined {
   const target = Number(fxId);
-  for (const mod of (algData as { Modules: { alg: AlgEntry[] }[] }).Modules) {
+  for (const mod of (algData as { Modules: AlgModule[] }).Modules) {
     const found = mod.alg?.find((a) => a.fxid === target);
     if (found) return found;
   }
@@ -81,7 +87,6 @@ export function getBaseAlgorithms(): Algorithm[] {
       out.push(cab);
     }
   }
-  // Dedupe by fxId
   const seen = new Set<string>();
   return out.filter((a) => {
     if (seen.has(a.fxId)) return false;
