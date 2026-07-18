@@ -1,11 +1,11 @@
 // Dynamic base tone presets. The full amp + cab catalog is read from
 // alg_data.json so every algorithm the device knows about is available — no
-// manual curation required. The actual .prst byte assembly (name, amp + cab
-// fxIds) lives in buildBasePresetBytes below, which uses the compact 295-byte
-// 60-A_twd_deluxe.prst template that loads cleanly on the Matribox II Pro.
+// manual curation required. buildBasePresetBytes below uses the fixed
+// 57-A_amp_com_botoes.p.prst template (311 bytes) that has real amp param
+// slots and loads cleanly on the Matribox II Pro.
 
 import algData from '../data/alg_data.json';
-import templateRaw from '../data/amp+cab/60-A_twd_deluxe.prst?raw';
+import templateRaw from '../lib/57-A_amp_com_botoes.p.prst?raw';
 
 export interface BasePreset {
   id: string;
@@ -87,8 +87,8 @@ const TEMPLATE_B64 = templateRaw.trim();
 
 const NAME_START = 30;
 const NAME_END = 44;
-const AMP_FXID_POS = 161;
-const CAB_FXID_LOW_POS = 165;
+const AMP_FXID_POS = 163;
+const CAB_FXID_LOW_POS = 167;
 
 function decodeTemplate(): number[] {
   return JSON.parse(atob(TEMPLATE_B64));
@@ -99,10 +99,10 @@ function encodeString(str: string): number[] {
 }
 
 /**
- * Build the base preset bytes from the compact 60-A_twd_deluxe.prst template.
- * Injects the preset name, the amp fxId (4-byte LE at offset 161) and the cab
- * fxId low byte (offset 165). The compact template has no amp param section —
- * amp params are injected separately in presetDownload.ts.
+ * Build the base preset bytes from the fixed 57-A_amp_com_botoes.p.prst
+ * template. Overwrites the preset name (offset 30), amp fxId (4-byte LE at
+ * offset 163) and cab fxId low byte (offset 167) in place. The file size
+ * never changes.
  */
 export function buildBasePresetBytes(
   title: string,
