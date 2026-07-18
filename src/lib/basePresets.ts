@@ -1,11 +1,9 @@
 // Dynamic base tone presets. The full amp + cab catalog is read from
 // alg_data.json so every algorithm the device knows about is available — no
-// manual curation required. buildBasePresetBytes below uses the fixed
-// 57-A_amp_com_botoes.p.prst template (311 bytes) that has real amp param
-// slots and loads cleanly on the Matribox II Pro.
+// manual curation required. The AI picks the amp + cab fxIds and the binary
+// .prst is assembled dynamically by presetDownload.ts (no fixed template).
 
 import algData from '../data/alg_data.json';
-import templateRaw from '../lib/57-A_amp_com_botoes.p.prst?raw';
 
 export interface BasePreset {
   id: string;
@@ -79,59 +77,4 @@ export const basePresets: BasePreset[] = buildBasePresets();
 
 export function getBasePreset(id: string): BasePreset | undefined {
   return basePresets.find((p) => p.id === id);
-}
-
-// --- Compact template byte assembly ---------------------------------------
-
-const TEMPLATE_B64 = templateRaw.trim();
-
-const NAME_START = 30;
-const NAME_END = 44;
-const AMP_FXID_POS = 163;
-const CAB_FXID_POS = 167;
-
-function decodeTemplate(): number[] {
-  return JSON.parse(atob(TEMPLATE_B64));
-}
-
-function encodeString(str: string): number[] {
-  return Array.from(new TextEncoder().encode(str));
-}
-
-/**
- * Build the base preset bytes from the fixed 57-A_amp_com_botoes.p.prst
- * template. Overwrites the preset name (offset 30), amp fxId (4-byte LE at
- * offset 163) and cab fxId (4-byte LE at offset 167) in place. The file size
- * never changes.
- */
-export function buildBasePresetBytes(
-  title: string,
-  ampFxId: string,
-  cabFxId: string,
-): number[] {
-  const buffer = decodeTemplate();
-
-  const fieldLen = NAME_END - NAME_START + 1;
-  const nameBytes = encodeString(title).slice(0, fieldLen);
-  for (let i = 0; i < fieldLen; i++) {
-    buffer[NAME_START + i] = nameBytes[i] ?? 0;
-  }
-
-  if (ampFxId && /^\d+$/.test(ampFxId)) {
-    const n = Number(ampFxId) >>> 0;
-    buffer[AMP_FXID_POS] = n & 0xff;
-    buffer[AMP_FXID_POS + 1] = (n >>> 8) & 0xff;
-    buffer[AMP_FXID_POS + 2] = (n >>> 16) & 0xff;
-    buffer[AMP_FXID_POS + 3] = (n >>> 24) & 0xff;
-  }
-
-  if (cabFxId && /^\d+$/.test(cabFxId)) {
-    const n = Number(cabFxId) >>> 0;
-    buffer[CAB_FXID_POS] = n & 0xff;
-    buffer[CAB_FXID_POS + 1] = (n >>> 8) & 0xff;
-    buffer[CAB_FXID_POS + 2] = (n >>> 16) & 0xff;
-    buffer[CAB_FXID_POS + 3] = (n >>> 24) & 0xff;
-  }
-
-  return buffer;
 }

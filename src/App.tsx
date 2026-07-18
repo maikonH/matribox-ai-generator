@@ -103,16 +103,10 @@ export default function App() {
 
   const handleDownload = useCallback(() => {
     if (preset) {
-      const base = getBasePreset(selectedBaseId ?? '');
-      // When no base was manually selected, use the amp + cab fxIds the AI
-      // chose (modules 1 and 2) so the compact template is written with the
-      // correct algorithm IDs and amp params are injected as Float32 LE.
-      const ampFxId = base?.ampFxId ?? preset.modules[1]?.fxId;
-      const cabFxId = base?.cabFxId ?? preset.modules[2]?.fxId;
-      downloadPreset(preset, ampFxId, cabFxId);
+      downloadPreset(preset);
       showToast('Download do preset iniciado.', 'success');
     }
-  }, [preset, selectedBaseId, showToast]);
+  }, [preset, showToast]);
 
   return (
     <div className="min-h-screen bg-[#030712] text-slate-200">

@@ -1,107 +1,208 @@
-import type { GeneratedPreset } from './types';
-import templateRaw from '../lib/57-A_amp_com_botoes.p.prst?raw';
+import type { GeneratedPreset, PresetModule } from './types';
 
-// Fixed template: 57-A_amp_com_botoes.p.prst (311 bytes). This is an amp+cab
-// preset saved on the Matribox II Pro with all 6 amp knobs turned to specific
-// non-default values, so the real amp param slots are present and active.
+// Valeton GP-200 / Matribox II Pro .prst binary encoder.
+// Faithful TypeScript port of the official prst_encoder.py: assembles a
+// 1176-byte file from dynamic module blocks (header 0x0014 / 0x0044, slot,
+// enabled flag, u32 effect code, 10 float32 params) plus the fixed
+// header / metadata / chain / control tables / checksum trailer.
 //
-// We ONLY overwrite bytes in place — name, amp fxId, cab fxId, and the 6 amp
-// param float32 LE values. The file size never changes (always 311 bytes).
-//
-// Template layout (311 bytes):
-//   [30..44]    Name (15 bytes, null-padded)
-//   [163..166]  Amp fxId (4-byte LE)
-//   [167..170]  Cab fxId (4-byte LE)
-//   [187..190]  Gain   (float32 LE)
-//   [191..194]  Presence (float32 LE)
-//   [195..198]  Volume (float32 LE)
-//   [199..202]  Bass   (float32 LE)
-//   [203..206]  Middle (float32 LE)
-//   [207..210]  Treble (float32 LE)
+// No fixed-offset template — every byte is written by the encoder logic, so
+// any effect chain the AI produces is compiled into a valid binary.
 
-const TEMPLATE_B64 = templateRaw.trim();
+const FILE_SIZE = 0x498; // 1176 bytes
 
-const NAME_START = 30;
-const NAME_END = 44;
-const NAME_LEN = NAME_END - NAME_START + 1;
+const MAGIC = [0x54, 0x53, 0x52, 0x50]; // 'TSRP' ('PRST' reversed)
+const PARM_MARKER = [0x4d, 0x52, 0x41, 0x50]; // 'MRAP' ('PARM' reversed)
+const PRODUCT_ID = 'GP-2'; // stored reversed as '2-PG'
 
-const AMP_FXID_POS = 163;
-const CAB_FXID_POS = 167;
+const HEADER_VERSION = 3;
+const FIRMWARE_HEX = '00010100';
+const TIMESTAMP = 0x6b9eef20;
+const HEADER_FILE_SIZE = 0x464;
 
-const AMP_MODULE_IDX = 1;
-const AMP_PARAM_OFFSETS = [187, 191, 195, 199, 203, 207];
+const MODULE_COUNT = 11;
+const MODULE_SIZE = 0x40;
+const MODULE_BASE = 0xa0;
+const MAX_PARAMS = 10;
 
-function decodeTemplate(): number[] {
-  return JSON.parse(atob(TEMPLATE_B64));
+const CONTROLS_BASE = 0x3b0;
+const CHECKSUM_MARKER = 0x00000490;
+
+// --- low-level writers -----------------------------------------------------
+
+function writeU16(buffer: number[], offset: number, value: number): void {
+  buffer[offset] = value & 0xff;
+  buffer[offset + 1] = (value >>> 8) & 0xff;
 }
 
-function encodeString(str: string): number[] {
-  return Array.from(new TextEncoder().encode(str));
+function writeU32(buffer: number[], offset: number, value: number): void {
+  const n = value >>> 0;
+  buffer[offset] = n & 0xff;
+  buffer[offset + 1] = (n >>> 8) & 0xff;
+  buffer[offset + 2] = (n >>> 16) & 0xff;
+  buffer[offset + 3] = (n >>> 24) & 0xff;
 }
 
-function clamp(v: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, v));
-}
-
-function writeFloatLE(buffer: number[], pos: number, value: number): void {
+function writeFloat32(buffer: number[], offset: number, value: number): void {
   const buf = new ArrayBuffer(4);
   new DataView(buf).setFloat32(0, value, true);
   const view = new Uint8Array(buf);
+  for (let i = 0; i < 4; i++) buffer[offset + i] = view[i];
+}
+
+function clamp(v: number, min: number, max: number): number {
+  if (Number.isNaN(v)) return (min + max) / 2;
+  return Math.max(min, Math.min(max, v));
+}
+
+function asciiBytes(str: string): number[] {
+  return Array.from(new TextEncoder().encode(str));
+}
+
+// --- section encoders ------------------------------------------------------
+
+function encodeHeader(buffer: number[]): void {
+  for (let i = 0; i < 4; i++) buffer[i] = MAGIC[i];
+  writeU32(buffer, 0x04, 0);
+  writeU32(buffer, 0x08, HEADER_VERSION);
+  writeU32(buffer, 0x0c, 0);
+
+  // Product ID, stored byte-reversed ('GP-2' -> '2-PG').
+  const pid = asciiBytes(PRODUCT_ID).slice(0, 4);
+  while (pid.length < 4) pid.push(0);
+  for (let i = 0; i < 4; i++) buffer[0x10 + i] = pid[3 - i];
+
+  // Firmware version from hex.
   for (let i = 0; i < 4; i++) {
-    buffer[pos + i] = view[i];
+    buffer[0x14 + i] = parseInt(FIRMWARE_HEX.slice(i * 2, i * 2 + 2), 16);
+  }
+
+  writeU32(buffer, 0x18, TIMESTAMP);
+  writeU32(buffer, 0x1c, 1);
+  writeU32(buffer, 0x20, 0x28);
+  writeU32(buffer, 0x24, HEADER_FILE_SIZE);
+  for (let i = 0; i < 4; i++) buffer[0x28 + i] = PARM_MARKER[i];
+  writeU32(buffer, 0x2c, HEADER_FILE_SIZE);
+}
+
+function encodeMetadata(buffer: number[], preset: GeneratedPreset): void {
+  writeU16(buffer, 0x30, 2);
+  writeU16(buffer, 0x32, preset.bpm || 120);
+  writeU16(buffer, 0x34, 0);
+  writeU16(buffer, 0x36, preset.volume ?? 120);
+  writeU16(buffer, 0x38, 50);
+  writeU16(buffer, 0x3a, 0);
+  writeU16(buffer, 0x3c, 0);
+  writeU16(buffer, 0x3e, 0);
+}
+
+function encodeName(buffer: number[], title: string): void {
+  const bytes = asciiBytes(title).slice(0, 60);
+  for (let i = 0; i < bytes.length; i++) buffer[0x44 + i] = bytes[i];
+}
+
+function encodeChain(buffer: number[]): void {
+  writeU16(buffer, 0x88, 0x0008);
+  writeU16(buffer, 0x8a, 0x0010);
+
+  buffer[0x90] = 0; // program_index_repeat
+
+  const moduleCountInfo = [0, 4, 4, 4, 10];
+  for (let i = 0; i < 5; i++) buffer[0x91 + i] = moduleCountInfo[i];
+
+  // Signal chain order: modules are already authored in slot order 0..10.
+  for (let i = 0; i < 10; i++) buffer[0x96 + i] = i;
+}
+
+function encodeModule(
+  buffer: number[],
+  offset: number,
+  slot: number,
+  module: PresetModule | null,
+): void {
+  writeU16(buffer, offset, 0x0014);
+  writeU16(buffer, offset + 2, 0x0044);
+
+  if (!module) {
+    // Empty / disabled slot: header + constant only, rest stays zero.
+    writeU16(buffer, offset + 6, 0x000f);
+    return;
+  }
+
+  buffer[offset + 4] = slot & 0xff;
+  buffer[offset + 5] = 1; // enabled
+  writeU16(buffer, offset + 6, 0x000f);
+
+  const effectCode = /^\d+$/.test(module.fxId) ? Number(module.fxId) : 0;
+  writeU32(buffer, offset + 8, effectCode);
+
+  for (let i = 0; i < MAX_PARAMS; i++) {
+    const p = module.params[i];
+    writeFloat32(buffer, offset + 12 + i * 4, p ? clamp(p.value, p.min, p.max) : 0);
   }
 }
 
-function writeU32LE(buffer: number[], pos: number, value: number): void {
-  const n = value >>> 0;
-  buffer[pos] = n & 0xff;
-  buffer[pos + 1] = (n >>> 8) & 0xff;
-  buffer[pos + 2] = (n >>> 16) & 0xff;
-  buffer[pos + 3] = (n >>> 24) & 0xff;
-}
-
-function applyName(buffer: number[], title: string): void {
-  const nameBytes = encodeString(title).slice(0, NAME_LEN);
-  for (let i = 0; i < NAME_LEN; i++) {
-    buffer[NAME_START + i] = nameBytes[i] ?? 0;
+function encodeModules(buffer: number[], preset: GeneratedPreset): void {
+  for (let i = 0; i < MODULE_COUNT; i++) {
+    const offset = MODULE_BASE + i * MODULE_SIZE;
+    const module = i < preset.modules.length ? preset.modules[i] : null;
+    encodeModule(buffer, offset, i, module);
   }
 }
 
-function applyFxIds(buffer: number[], ampFxId?: string, cabFxId?: string): void {
-  if (ampFxId && /^\d+$/.test(ampFxId)) {
-    writeU32LE(buffer, AMP_FXID_POS, Number(ampFxId));
+function encodeControls(buffer: number[]): void {
+  // Nine default control records (12 bytes each).
+  for (let i = 0; i < 9; i++) {
+    const offset = CONTROLS_BASE + i * 12;
+    writeU16(buffer, offset, 0x000c);
+    writeU16(buffer, offset + 2, 0x000c);
+    writeU16(buffer, offset + 4, i > 0 ? 0x00ff : 0x000a);
+    writeU32(buffer, offset + 6, 0);
+    writeFloat32(buffer, offset + 8, 100.0);
   }
-  // CAB fxId is stored with a 0xbc marker in the high byte (byte 3) instead of
-  // the real 0x0a. Only overwrite the low byte at offset 167; bytes 168-170
-  // stay as 00 00 bc from the template. Overwriting byte 170 with 0x0a corrupts
-  // the marker and the Matribox ignores the CAB change.
-  if (cabFxId && /^\d+$/.test(cabFxId)) {
-    buffer[CAB_FXID_POS] = Number(cabFxId) & 0xff;
+
+  // Three assignment records (8 bytes each).
+  const assignmentsBase = CONTROLS_BASE + 9 * 12;
+  for (let i = 0; i < 3; i++) {
+    const offset = assignmentsBase + i * 8;
+    writeU16(buffer, offset, 0x0010);
+    writeU16(buffer, offset + 2, 0x0004);
+    writeU16(buffer, offset + 4, 0);
+    writeU16(buffer, offset + 6, 0);
+  }
+
+  // Four toggle records (8 bytes each).
+  const togglesBase = assignmentsBase + 3 * 8;
+  for (let i = 0; i < 4; i++) {
+    const offset = togglesBase + i * 8;
+    writeU16(buffer, offset, 0x000f);
+    writeU16(buffer, offset + 2, 0x0008);
+    writeU16(buffer, offset + 4, i);
+    writeU32(buffer, offset + 6, 0);
   }
 }
 
-function applyAmpParams(buffer: number[], preset: GeneratedPreset): void {
-  const ampModule = preset.modules[AMP_MODULE_IDX];
-  if (!ampModule) return;
-
-  const params = ampModule.params;
-  for (let i = 0; i < 6 && i < params.length; i++) {
-    const p = params[i];
-    if (!p) continue;
-    writeFloatLE(buffer, AMP_PARAM_OFFSETS[i], clamp(p.value, p.min, p.max));
-  }
+function encodeChecksum(buffer: number[]): void {
+  const offset = FILE_SIZE - 8;
+  writeU32(buffer, offset, CHECKSUM_MARKER);
+  // The official encoder writes the checksum value from the input JSON,
+  // defaulting to 0 for freshly authored presets (the device does not reject
+  // a zero trailer). Matching that proven behavior here.
+  writeU32(buffer, offset + 4, 0);
 }
 
-function buildPresetBuffer(
-  preset: GeneratedPreset,
-  baseAmpFxId?: string,
-  baseCabFxId?: string,
-): number[] {
-  const buffer = decodeTemplate();
-  applyName(buffer, preset.title);
-  applyFxIds(buffer, baseAmpFxId, baseCabFxId);
-  applyAmpParams(buffer, preset);
-  return buffer;
+// --- build + download ------------------------------------------------------
+
+function buildPresetBuffer(preset: GeneratedPreset): Uint8Array {
+  const buffer = new Array<number>(FILE_SIZE).fill(0);
+  encodeHeader(buffer);
+  encodeMetadata(buffer, preset);
+  encodeName(buffer, preset.title);
+  encodeChain(buffer);
+  encodeModules(buffer, preset);
+  encodeControls(buffer);
+  encodeChecksum(buffer);
+  return new Uint8Array(buffer);
 }
 
 function slugify(title: string): string {
@@ -114,16 +215,9 @@ function slugify(title: string): string {
     .replace(/^_|_$/g, '');
 }
 
-export function downloadPreset(
-  preset: GeneratedPreset,
-  baseAmpFxId?: string,
-  baseCabFxId?: string,
-): void {
-  const buffer = buildPresetBuffer(preset, baseAmpFxId, baseCabFxId);
-  const jsonStr = '[' + buffer.join(',') + ']';
-  const b64 = btoa(jsonStr);
-
-  const blob = new Blob([b64], { type: 'application/octet-stream' });
+export function downloadPreset(preset: GeneratedPreset): void {
+  const bytes = buildPresetBuffer(preset);
+  const blob = new Blob([bytes], { type: 'application/octet-stream' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
