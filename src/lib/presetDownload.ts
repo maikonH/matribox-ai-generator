@@ -1,31 +1,51 @@
-import { deflate } from 'pako';
-import type { GeneratedPreset, PresetModule } from './types';
+import type { GeneratedPreset } from './types';
 
-// Frozen factory template: a pristine 245-byte .prst payload that loads
-// perfectly on the Matribox II Pro DSP. The array is NOT pure bytes — index
-// 65 holds the float 178.54. Coercing it to an integer (e.g. via Uint8Array)
-// corrupts the roundtrip and crashes the device. Keep it as plain numbers.
+// Factory template: the 33-A LE MARSHALL preset decoded as a number array.
+// This is a valid .prst file that loads on the Matribox II Pro. We modify
+// only the name field and the float32-LE parameter values, preserving the
+// module chain, fxids, routing tables, and fixed header/footer.
 const TEMPLATE_B64 =
-  'WzMsMiwwLDAsMTYsMTEsMCwxMjgsMCw1LDEsNCwzLDEyLDEsNSwxLDE1LDEwNSwyLDEwNSwxNjQsMiwwLDIsMSw1NCw4NCwyMzYsMjA0LDc3LDk3LDExNiwxMTQsMTA1LDk4LDExMSwxMjAsMzIsNzMsNzMsMzIsODAsODIsNzksMTMyLDMsMiw1NSwzOCw4NywyNDYsNTQsMTA4LDAsMSwyMzIsODEsMjM3LDU0LDEwOCwwLDEsMjE5LDExOSwxNzguNTQsMTA4LDAsMSwyMzksMTgyLDI1Myw1NCwxMDgsMCwxLDkwLDIxMSwxNjEsNTQsMTA4LDAsMSw4Nyw2OSwyMDksNTQsMTA4LDAsMSwyMTEsOTgsMjMyLDUzLDEwOCwwLDEsMjM0LDE1LDgsNTUsMTEwLDAsMjA0LDE1LDE1Niw4LDE0NCwwLDk3LDE0LDEwLDE2NCwxLDQsMSwyNTUsMjU1LDEzLDAsMCwwLDEwMCwyLDE2MCw0LDMsMywxLDEsMiwzLDQsMTE1LDMsNywwLDUsMTIxLDIsNzYsMTA4LDEsMSwwLDQsMSwyNTUsNTMsMCwwLDE1MiwzLDMyLDEwLDE2LDAsMTEwLDEwLDIzMCwyLDk4LDYsNSwxLDExNiwwLDMyLDAsMCwxODUsMTUsMCw1MCwwLDEyMCwxOTMsMTA3LDk1LDEzOSw5Miw3LDEsMCwzOSw0LDEzLDEyOCwyLDMyLDksMTYsMCwxLDIwMCw2NiwwLDAsNjAsMTIsMCwxMTMsMTA2LDY5LDEyOCwxMCw0LDgsMSw3MSwxODksMTkwLDE2MCw3MSwxNDAsMSwzMiwyMiwxNiwwLDAsMiwyLDAsMCwxNiwxMiwwLDAsMCwwLDAsOSwxLDAsMCwxMjgsNjMsMjAwLDAsMCw0OCwxNywwLDBd';
+  'WzMsMiwwLDAsMTYsMTEsMCwxMjgsMCw1LDEsNCwzLDEyLDEsNSwxLDE1LDEwNSwyLDEwNSwxNjQsMiwwLDIsMSw1NCw1MiwyMjIsNzcsNzYsNjksMzIsNzcsNjUsODIsODMsNzIsNjUsNzYsNzYsMCwwLDgyLDc5LDEzMiwzLDIsNTMsMTY5LDEzNiwxMTMsNTQsMTA4LDAsMSw1NSwxNDQsMTY3LDU0LDEwOCwwLDEsMjQ2LDI0OSwyNTUsNTMsMTA4LDAsMSwxMTYsMTI0LDI1MCw1NCwxMDgsMCwxLDE0NCwyMTgsMjUzLDU0LDEwOCwwLDEsMjU0LDI0OSw5NSw1NCwxMDgsMCwxLDE4OCw3LDE1Miw1NCwxMDgsMCwxLDEyMCwxMTYsOTYsMTgwLDExMCwwLDg4LDUwLDE1Niw4LDE0NCwwLDk3LDE0LDEwLDE2NCwxLDQsMSwyNTUsMjU1LDEzLDAsMCwwLDEwMSwyLDE1LDEzMiwyLDEwLDMsMSwxLDIsMyw4LDAsMCwwLDcsNSwwLDYsMTIxLDIsNzYsMTUyLDIsNyw0LDEsMSw1LDAsMiw0LDYsMywyNTUsOTYsMCw0LDExLDAsNywxMCwxNSwzLDksMTA0LDEsMCwxMSwyNTUsMiwwLDAsMTUsMjcsMCwwLDAsNTcsMCwwLDEsMywwLDAsMTIsMywwLDAsNiwzMCwwLDAsMywyOSwwLDAsMTEsMTM2LDcsNDUsMTYsMCwxMTAsMTAsMjMwLDIsMTEyLDIsMCw0LDUsMSwwLDAsMTEyLDY2LDAsMCwxNDgsNjYsMCwwLDEyMCw2NiwwLDAsMTYsNjYsMCwwLDIwLDY2LDEwMCwzLDMyLDUsMTIsMCwyLDIyNCw2NSwwLDAsMTYwLDIwNCwwLDcsNzIsNjcsMCwwLDI1MCw2NywwLDAsNzIsNjYsMTcyLDAsMzIsNSw0LDEsOSwwLDAsMTI4LDE5MiwwLDAsODAsMTkzLDAsMCwxNjAsMTkzLDMyLDksMjIwLDAsNyw5Niw2NSwwLDAsMTM4LDY2LDAsMCwxOTIsNjUsNDAsMTQ4LDEsMywyMDAsNjYsMCwwLDEyOCw2Myw0MCw2MCwwLDU0LDM2LDAsMTI0LDQsNTQsMTA4LDAsNjIsOTIsMCwxMSwzMiw2NiwwLDAsMTM2LDY1LDAsMCwzNiw2NiwwLDAsMjQ4LDY1LDMyLDUsMTg4LDEsMjM3LDEwLDE2LDEyNCw1LDQsNjQsMCwwLDIyNCw2NCwwLDAsMjM2LDE2LDEwOCwzNywxMDgsMjIsMTA4LDAsMjUyLDQsMzIsMywyOSwwLDk2LDMyLDEwLDE3Miw0LDEwOCw1MiwxMDksMTAsNTYsMzIsMTAsOTIsNywxMjQsNSwzMiwxNDksMTMsMCwxLDEyOCwwLDE3NSwyMyw3OCwwLDgwLDE5MywxMDcsOTUsMTMxLDIsNywxLDAsMTU2LDEwMSwxMTIsMCwxMjgsMiwzMiw5LDE2LDAsOTYsNTQsNjAsMTIsMCwxMTMsMTA2LDY5LDEyOCwxMCw0LDgsMSwxNDksNTQsMTcwLDE0OCwxNDksMTQwLDEsNDIsMTcsMCwxLDU1LDQ4LDAsNDIsOTYsMCwxNDAsMSwwLDIsMiwwLDAsMTYsMTIsMCwwLDAsMCwwLDksMSwwLDAsMTI4LDYzLDIwMCwwLDAsNDgsMTcsMCwwXQ==';
 
-// Factory offsets reverse-engineered from the pristine file.
-const PRESET_NAME_START = 30;
-const PRESET_NAME_END = 44; // inclusive: "Matribox II PRO" (15 bytes)
-const GAIN_BYTE = 122; // gain/volume byte (original factory value: 100)
+// Name field: bytes [26-44] (19 bytes). Text goes at [30-44] (15 bytes).
+const NAME_START = 30;
+const NAME_END = 44;
 
-// Slider regions: contiguous byte runs holding 0-100 module parameter values.
-// Each region maps to one module's params in signal-chain order.
-const SLIDER_REGIONS: { start: number; end: number }[] = [
-  { start: 46, end: 53 }, // Module 1 params
-  { start: 54, end: 61 }, // Module 2 params
-  { start: 62, end: 69 }, // Module 3 params
-  { start: 70, end: 77 }, // Module 4 params
-  { start: 78, end: 85 }, // Module 5 params
-  { start: 86, end: 93 }, // Module 6 params
+// Parameter positions: float32 little-endian values at exact byte offsets.
+// Each entry maps a byte position to a module and param index in the AI's output.
+// The AI generates 8 modules; we map their params to these positions.
+interface ParamSlot {
+  pos: number;
+  moduleIdx: number;
+  paramIdx: number;
+}
+
+const PARAM_SLOTS: ParamSlot[] = [
+  // AMP module (module index 1 in AI output) - 5 params
+  { pos: 216, moduleIdx: 1, paramIdx: 0 },
+  { pos: 220, moduleIdx: 1, paramIdx: 1 },
+  { pos: 224, moduleIdx: 1, paramIdx: 2 },
+  { pos: 228, moduleIdx: 1, paramIdx: 3 },
+  { pos: 232, moduleIdx: 1, paramIdx: 4 },
+  // Delay module (module index 5) - 2 params
+  { pos: 253, moduleIdx: 5, paramIdx: 0 },
+  { pos: 257, moduleIdx: 5, paramIdx: 1 },
+  // EQ module (module index 3) - 3 params
+  { pos: 268, moduleIdx: 3, paramIdx: 0 },
+  { pos: 272, moduleIdx: 3, paramIdx: 1 },
+  { pos: 276, moduleIdx: 3, paramIdx: 2 },
+  // Mod module (module index 4) - 2 params
+  { pos: 287, moduleIdx: 4, paramIdx: 0 },
+  { pos: 291, moduleIdx: 4, paramIdx: 1 },
+  // Switch (module 4, param 2 - on/off)
+  { pos: 301, moduleIdx: 4, paramIdx: 2 },
+  // Reverb module (module index 6) - 3 params
+  { pos: 322, moduleIdx: 6, paramIdx: 0 },
+  { pos: 326, moduleIdx: 6, paramIdx: 1 },
+  { pos: 330, moduleIdx: 6, paramIdx: 2 },
+  // Last param (module 6, param 3)
+  { pos: 345, moduleIdx: 6, paramIdx: 3 },
 ];
-
-// Module ID bytes: one byte per module identifying the algorithm variant.
-const MODULE_ID_BYTES = [114, 117, 120, 123, 126, 129];
 
 function decodeTemplate(): number[] {
   return JSON.parse(atob(TEMPLATE_B64));
@@ -35,89 +55,49 @@ function encodeString(str: string): number[] {
   return Array.from(new TextEncoder().encode(str));
 }
 
-function clampInt(v: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, Math.round(v)));
-}
-
-function clampSlider(v: number): number {
-  return clampInt(v, 0, 100);
+function clamp(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v));
 }
 
 function applyName(buffer: number[], title: string): void {
-  const fieldLen = PRESET_NAME_END - PRESET_NAME_START + 1;
+  const fieldLen = NAME_END - NAME_START + 1;
   const nameBytes = encodeString(title).slice(0, fieldLen);
   for (let i = 0; i < fieldLen; i++) {
-    buffer[PRESET_NAME_START + i] = nameBytes[i] ?? 0;
+    buffer[NAME_START + i] = nameBytes[i] ?? 0;
   }
 }
 
-function applyModules(buffer: number[], modules: PresetModule[]): void {
-  const count = Math.min(modules.length, SLIDER_REGIONS.length);
-  for (let i = 0; i < count; i++) {
-    const region = SLIDER_REGIONS[i];
-    const regionLen = region.end - region.start + 1;
-    const params = modules[i].params.slice(0, regionLen);
-
-    for (let p = 0; p < params.length; p++) {
-      // Normalize 0-100 param ranges into the 0-100 slider byte region.
-      const param = params[p];
-      let normalized: number;
-      if (param.min >= 0 && param.max <= 100) {
-        normalized = clampSlider(param.value);
-      } else {
-        const span = param.max - param.min || 1;
-        normalized = clampSlider(((param.value - param.min) / span) * 100);
-      }
-      buffer[region.start + p] = normalized;
-    }
-
-    // Module ID: stable hash of fxId folded into a single byte, kept within
-    // the same byte-width as the factory IDs so it never alters the struct.
-    const fxId = modules[i].fxId;
-    let id = 0;
-    for (let c = 0; c < fxId.length; c++) id = (id * 31 + fxId.charCodeAt(c)) & 0xff;
-    buffer[MODULE_ID_BYTES[i]] = id;
+function writeFloatLE(buffer: number[], pos: number, value: number): void {
+  const buf = new ArrayBuffer(4);
+  new DataView(buf).setFloat32(0, value, true);
+  const view = new Uint8Array(buf);
+  for (let i = 0; i < 4; i++) {
+    buffer[pos + i] = view[i];
   }
 }
 
-function applyVolume(buffer: number[], volume: number): void {
-  buffer[GAIN_BYTE] = clampSlider(volume);
+function applyParams(buffer: number[], preset: GeneratedPreset): void {
+  for (const slot of PARAM_SLOTS) {
+    const mod = preset.modules[slot.moduleIdx];
+    if (!mod || !mod.params[slot.paramIdx]) continue;
+
+    const param = mod.params[slot.paramIdx];
+    const value = clamp(param.value, param.min, param.max);
+    writeFloatLE(buffer, slot.pos, value);
+  }
 }
 
 function buildPresetBuffer(preset: GeneratedPreset): number[] {
-  const buffer = decodeTemplate().slice();
-
+  const buffer = decodeTemplate();
   applyName(buffer, preset.title);
-  applyVolume(buffer, preset.volume);
-  applyModules(buffer, preset.modules);
-
+  applyParams(buffer, preset);
   return buffer;
-}
-
-function bytesToBase64(bytes: number[] | Uint8Array): string {
-  let binary = '';
-  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  const chunkSize = 0x8000;
-  for (let i = 0; i < arr.length; i += chunkSize) {
-    binary += String.fromCharCode.apply(null, Array.from(arr.subarray(i, i + chunkSize)));
-  }
-  return btoa(binary).replace(/\s+/g, '');
 }
 
 export function downloadPreset(preset: GeneratedPreset): void {
   const buffer = buildPresetBuffer(preset);
-
-  // Explicit no-space serialization: every value joined by ',' with no
-  // whitespace, wrapped in brackets. Guarantees a 100% glued string.
-  const jsonStr = '[' + Array.from(buffer).join(',') + ']';
-  const jsonBytes = new TextEncoder().encode(jsonStr);
-
-  // Raw Deflate (no 78 9C zlib header) — matches the Flutter RawZLibFilter /
-  // ZLibDecoder used by the Sonicake firmware.
-  const compressed = deflate(jsonBytes, { raw: true });
-
-  // Linear, glued Base64 with no whitespace or newlines.
-  const b64 = bytesToBase64(compressed);
+  const jsonStr = '[' + buffer.join(',') + ']';
+  const b64 = btoa(jsonStr);
 
   const blob = new Blob([b64], { type: 'application/octet-stream' });
   const url = URL.createObjectURL(blob);

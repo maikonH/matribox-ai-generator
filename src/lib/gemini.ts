@@ -24,9 +24,10 @@ ${algList}
 REGRAS OBRIGATÓRIAS:
 1. Responda SEMPRE em JSON válido, sem markdown, sem texto adicional.
 2. Use apenas fxId e fxTitle que existam na lista acima.
-3. Cada módulo deve ter entre 3 e 6 parâmetros, cada um dentro do range [min, max] do algoritmo correspondente.
-4. Inclua entre 5 e 8 módulos formando uma cadeia de sinal coerente (Comp, Drive, Amp, Cab, EQ, Delay, Reverb, etc.).
-5. A descrição do preset deve ser textual, conceitual e detalhada sobre o timbre, estilo musical e contexto de uso.
+3. Gere EXATAMENTE 8 módulos nesta ordem fixa: DRIVE, AMP, CAB, EQ, MOD, DELAY, REVERB, VOLUME.
+4. Parâmetros por módulo: DRIVE(3), AMP(5), CAB(3), EQ(3), MOD(3), DELAY(2), REVERB(4), VOLUME(1).
+5. Cada parâmetro deve estar dentro do range [min, max] do algoritmo correspondente.
+6. A descrição do preset deve ser textual, conceitual e detalhada sobre o timbre, estilo musical e contexto de uso.
 
 FORMATO DE RESPOSTA (JSON estrito):
 {
@@ -36,13 +37,14 @@ FORMATO DE RESPOSTA (JSON estrito):
   "volume": 95,
   "modules": [
     {
-      "fxId": "comp_calif_fast",
-      "fxTitle": "Calif IV Comp Fast",
-      "type": "COMP",
-      "subType": "COMP",
+      "fxId": "drive_tube808",
+      "fxTitle": "Tube 808 Drive",
+      "type": "DRIVE",
+      "subType": "DRIVE",
       "params": [
-        { "name": "threshold", "value": -24 },
-        { "name": "ratio", "value": 4 }
+        { "name": "gain", "value": 35 },
+        { "name": "tone", "value": 50 },
+        { "name": "level", "value": 70 }
       ]
     }
   ]
