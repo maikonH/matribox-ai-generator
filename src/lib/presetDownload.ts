@@ -26,9 +26,14 @@ const MODULE_DECL_COUNT = 8;
 const MODULE_DECL_SIZE = 7;
 
 // The AI emits 8 modules in a fixed order: DRIVE, AMP, CAB, EQ, MOD, DELAY,
-// REVERB, VOLUME (see gemini.ts system prompt). These indices line up with
-// the 8 declaration blocks and with the PARAM_SLOTS moduleIdx values.
-const MODULE_ORDER = ['DRIVE', 'AMP', 'CAB', 'EQ', 'MOD', 'DELAY', 'REVERB', 'VOLUME'] as const;
+// REVERB, VOLUME (see gemini.ts system prompt). The template's hardware
+// declaration slots do NOT line up 1:1 with this order: the factory template
+// (33-A) runs the amp architecture through its CLONE block at slot 2,
+// leaving the standard AMP slot (1) unused. So the AI's AMP module is routed
+// to slot 2, and the AI's CAB module reuses the freed slot 1.
+//
+// AI module index → template declaration slot index.
+const SLOT_MAP = [0, 2, 1, 3, 4, 5, 6, 7];
 
 interface ParamSlot {
   pos: number;
@@ -119,15 +124,22 @@ function applyName(buffer: number[], title: string): void {
 }
 
 // Rewrite the 8 module declaration blocks (offsets 48..103) with the AI's
-// algorithm selections and enable flags. Bytes 4-6 (routing + reserved) are
-// always preserved from the template. When an algorithm's 3-byte signature
-// cannot be derived from its fxId, the template's bytes 1-3 for that slot
-// are left untouched (graceful fallback).
+// algorithm selections and enable flags. Each AI module is routed to its
+// template slot via SLOT_MAP: DRIVE→0, AMP→2 (CLONE block), CAB→1, and the
+// rest stay positional. Bytes 4-6 (routing + reserved) are always preserved
+// from the template. When an algorithm's 3-byte signature cannot be derived
+// from its fxId, the template's bytes 1-3 for that slot are left untouched
+// (graceful fallback). Any template slot not assigned to an AI module is
+// disabled (byte 0 = 0).
 function applyModules(buffer: number[], modules: PresetModule[]): void {
+  const usedSlots = new Set<number>();
+
   for (let i = 0; i < MODULE_DECL_COUNT; i++) {
-    const base = MODULE_DECL_START + i * MODULE_DECL_SIZE;
     const mod = modules[i];
     if (!mod) continue;
+
+    const slot = SLOT_MAP[i] ?? i;
+    const base = MODULE_DECL_START + slot * MODULE_DECL_SIZE;
 
     buffer[base] = mod.enabled === false ? 0 : 1;
 
@@ -139,6 +151,15 @@ function applyModules(buffer: number[], modules: PresetModule[]): void {
     }
     // else: keep template bytes 1-3 for this slot (fallback).
     // Bytes 4-6 are never touched here.
+
+    usedSlots.add(slot);
+  }
+
+  // Disable any template slot that no AI module was routed to.
+  for (let s = 0; s < MODULE_DECL_COUNT; s++) {
+    if (!usedSlots.has(s)) {
+      buffer[MODULE_DECL_START + s * MODULE_DECL_SIZE] = 0;
+    }
   }
 }
 
