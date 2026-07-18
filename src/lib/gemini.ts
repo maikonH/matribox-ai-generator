@@ -1,11 +1,12 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import type { Algorithm, GeneratedPreset } from './types';
+import type { Algorithm, GeneratedPreset, PresetModule } from './types';
 import { findAlgorithm } from './algorithmStore';
 import { getEffectiveApiKey } from './apiKeyStore';
+import type { BasePreset } from './basePresets';
 
 const MODEL_NAME = 'gemini-3.1-flash-lite';
 
-function buildSystemPrompt(algorithms: Algorithm[]): string {
+function buildSystemPrompt(algorithms: Algorithm[], basePreset?: BasePreset | null): string {
   const algList = algorithms
     .map((a) => {
       const params = a.params
@@ -15,10 +16,21 @@ function buildSystemPrompt(algorithms: Algorithm[]): string {
     })
     .join('\n');
 
+  const baseInstruction = basePreset
+    ? `BASE OBRIGATÓRIO: O usuário selecionou o tom base "${basePreset.name}" (${basePreset.ampName} + ${basePreset.cabName}).
+Você DEVE usar obrigatoriamente:
+  - Módulo AMP: fxId="${basePreset.ampFxId}" (fxTitle="${basePreset.ampName}")
+  - Módulo CAB: fxId="${basePreset.cabFxId}" (fxTitle="${basePreset.cabName}")
+NÃO substitua o amplificador nem a caixa — construa o resto da cadeia (DRIVE, EQ, MOD, DELAY, REVERB, VOLUME) AO REDOR deste tom base.
+Descrição do tom base: ${basePreset.description}
+
+`
+    : '';
+
   return `Você é o Matribox II Pro, um engenheiro de som especializado em gerar presets para processadores de guitarra.
 Sua tarefa é criar um preset completo baseado no prompt do usuário, utilizando SOMENTE os algoritmos disponíveis na lista abaixo.
 
-ALGORITMOS DISPONÍVEIS (fxId, fxTitle, type, subType, params com min/max):
+${baseInstruction}ALGORITMOS DISPONÍVEIS (fxId, fxTitle, type, subType, params com min/max):
 ${algList}
 
 REGRAS OBRIGATÓRIAS:
@@ -59,6 +71,7 @@ function clampParam(value: number, min: number, max: number): number {
 function reconcilePreset(
   raw: GeneratedPreset,
   algorithms: Algorithm[],
+  basePreset?: BasePreset | null,
 ): GeneratedPreset {
   const modules = (raw.modules || []).map((mod) => {
     const alg = findAlgorithm(algorithms, mod.fxId, mod.type);
@@ -83,18 +96,66 @@ function reconcilePreset(
     };
   });
 
+  // Force the selected base tone's amp + cab fxIds so the downloaded .prst
+  // preserves the exact amp+cab algorithm the user picked, regardless of what
+  // the AI returned for those slots.
+  let finalModules = modules;
+  if (basePreset) {
+    finalModules = modules.map((mod, i) => {
+      if (i === 1) {
+        return patchModule(mod, basePreset.ampFxId, basePreset.ampName, algorithms);
+      }
+      if (i === 2) {
+        return patchModule(mod, basePreset.cabFxId, basePreset.cabName, algorithms);
+      }
+      return mod;
+    });
+  }
+
   return {
     title: raw.title || 'Preset Sem Nome',
     description: raw.description || '',
     bpm: raw.bpm || 120,
     volume: raw.volume ?? 95,
-    modules,
+    modules: finalModules,
   };
+}
+
+function patchModule(
+  mod: PresetModule,
+  fxId: string,
+  fxTitle: string,
+  algorithms: Algorithm[],
+): PresetModule {
+  const alg = findAlgorithm(algorithms, fxId);
+  if (alg) {
+    const validParams = alg.params.map((algParam) => {
+      const incoming = mod.params?.find((p) => p.name === algParam.name);
+      const value = incoming ? clampParam(Number(incoming.value), algParam.min, algParam.max) : algParam.value;
+      return {
+        name: algParam.name,
+        displayName: algParam.displayName,
+        value,
+        min: algParam.min,
+        max: algParam.max,
+        unit: algParam.unit,
+      };
+    });
+    return {
+      fxId: alg.fxId,
+      fxTitle: alg.fxTitle,
+      type: alg.type,
+      subType: alg.subType || '',
+      params: validParams,
+    };
+  }
+  return { ...mod, fxId, fxTitle };
 }
 
 export async function generatePreset(
   userPrompt: string,
   algorithms: Algorithm[],
+  basePreset?: BasePreset | null,
 ): Promise<GeneratedPreset> {
   const apiKey = getEffectiveApiKey();
   if (!apiKey) {
@@ -104,7 +165,7 @@ export async function generatePreset(
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
     model: MODEL_NAME,
-    systemInstruction: buildSystemPrompt(algorithms),
+    systemInstruction: buildSystemPrompt(algorithms, basePreset),
     generationConfig: {
       temperature: 0.7,
       responseMimeType: 'application/json',
@@ -135,5 +196,5 @@ export async function generatePreset(
     }
   }
 
-  return reconcilePreset(parsed, algorithms);
+  return reconcilePreset(parsed, algorithms, basePreset);
 }

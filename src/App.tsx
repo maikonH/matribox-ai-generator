@@ -3,11 +3,14 @@ import Header from './components/Header';
 import SettingsDrawer from './components/SettingsDrawer';
 import PromptBar from './components/PromptBar';
 import PresetCard from './components/PresetCard';
+import BasePresetSelector from './components/BasePresetSelector';
 import ToastContainer from './components/ToastContainer';
 import { useToasts } from './hooks/useToasts';
 import { loadAlgorithmsAsync } from './lib/algorithmStore';
 import { generatePreset } from './lib/gemini';
 import { downloadPreset } from './lib/presetDownload';
+import { basePresets, getBasePreset } from './lib/basePresets';
+import { getBaseAlgorithms } from './lib/baseAlgorithms';
 import type { Algorithm, GeneratedPreset } from './lib/types';
 
 export default function App() {
@@ -16,26 +19,35 @@ export default function App() {
   const [prompt, setPrompt] = useState('');
   const [preset, setPreset] = useState<GeneratedPreset | null>(null);
   const [loading, setLoading] = useState(false);
+  const [selectedBaseId, setSelectedBaseId] = useState<string | null>(null);
   const { toasts, showToast, dismiss } = useToasts();
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const loaded = await loadAlgorithmsAsync();
-      if (!cancelled) setAlgorithms(loaded);
+      if (cancelled) return;
+      // Merge base amp/cab algorithms so the AI always knows about the
+      // base tones even if the user uploaded a partial alg_data.json.
+      const baseAlgs = getBaseAlgorithms();
+      const existing = new Set(loaded.map((a) => a.fxId));
+      const merged = [...loaded, ...baseAlgs.filter((a) => !existing.has(a.fxId))];
+      setAlgorithms(merged);
     })();
     return () => { cancelled = true; };
   }, []);
 
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim() || loading) return;
-    if (algorithms.length === 0) {
+    const base = getBasePreset(selectedBaseId ?? '') ?? null;
+    const merged = algorithms.length > 0 ? algorithms : getBaseAlgorithms();
+    if (merged.length === 0) {
       showToast('Nenhum algoritmo carregado. Abra Settings e faça upload do JSON.', 'error');
       return;
     }
     setLoading(true);
     try {
-      const result = await generatePreset(prompt.trim(), algorithms);
+      const result = await generatePreset(prompt.trim(), merged, base);
       setPreset(result);
       showToast(`Preset "${result.title}" gerado com sucesso!`, 'success');
     } catch (e) {
@@ -43,20 +55,22 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [prompt, loading, algorithms, showToast]);
+  }, [prompt, loading, algorithms, selectedBaseId, showToast]);
 
   const handleQuickPrompt = useCallback(
     (quick: string) => {
       setPrompt(quick);
       setLoading(true);
+      const base = getBasePreset(selectedBaseId ?? '') ?? null;
+      const merged = algorithms.length > 0 ? algorithms : getBaseAlgorithms();
       const run = async () => {
-        if (algorithms.length === 0) {
+        if (merged.length === 0) {
           showToast('Nenhum algoritmo carregado. Abra Settings e faça upload do JSON.', 'error');
           setLoading(false);
           return;
         }
         try {
-          const result = await generatePreset(quick, algorithms);
+          const result = await generatePreset(quick, merged, base);
           setPreset(result);
           showToast(`Preset "${result.title}" gerado com sucesso!`, 'success');
         } catch (e) {
@@ -67,7 +81,7 @@ export default function App() {
       };
       run();
     },
-    [algorithms, showToast],
+    [algorithms, selectedBaseId, showToast],
   );
 
   const handleParamChange = useCallback(
@@ -108,6 +122,12 @@ export default function App() {
               Descreva o som e a IA monta a cadeia de sinal completa
             </p>
           </div>
+          <BasePresetSelector
+            basePresets={basePresets}
+            selectedId={selectedBaseId}
+            onSelect={setSelectedBaseId}
+            disabled={loading}
+          />
           <PromptBar
             value={prompt}
             onChange={setPrompt}
