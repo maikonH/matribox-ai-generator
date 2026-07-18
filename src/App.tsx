@@ -104,7 +104,11 @@ export default function App() {
   const handleDownload = useCallback(() => {
     if (preset) {
       const base = getBasePreset(selectedBaseId ?? '');
-      downloadPreset(preset, base?.ampFxId);
+      // When no base was manually selected, use the amp fxId the AI chose
+      // (module index 1 = AMP slot) so buildBasePresetBytes is called and
+      // the amp byte injection works exactly as with a manual selection.
+      const ampFxId = base?.ampFxId ?? preset.modules[1]?.fxId;
+      downloadPreset(preset, ampFxId);
       showToast('Download do preset iniciado.', 'success');
     }
   }, [preset, selectedBaseId, showToast]);
