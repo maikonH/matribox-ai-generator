@@ -108,7 +108,8 @@ export default function App() {
       // (module index 1 = AMP slot) so buildBasePresetBytes is called and
       // the amp byte injection works exactly as with a manual selection.
       const ampFxId = base?.ampFxId ?? preset.modules[1]?.fxId;
-      downloadPreset(preset, ampFxId);
+      const cabFxId = base?.cabFxId ?? preset.modules[2]?.fxId;
+      downloadPreset(preset, ampFxId, cabFxId);
       showToast('Download do preset iniciado.', 'success');
     }
   }, [preset, selectedBaseId, showToast]);

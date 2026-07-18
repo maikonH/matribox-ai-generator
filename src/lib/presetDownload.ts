@@ -136,12 +136,13 @@ function applyParams(buffer: number[], preset: GeneratedPreset): void {
 function buildPresetBuffer(
   preset: GeneratedPreset,
   baseAmpFxId?: string,
+  baseCabFxId?: string,
 ): number[] {
   // When a base preset is selected, build the bytes dynamically from the
-  // single twd_deluxe template, injecting the preset name and the amp fxId
-  // at their known offsets. The cab is auto-paired by the device.
+  // single twd_deluxe template, injecting the preset name, amp fxId, and
+  // cab fxId at their known offsets.
   if (baseAmpFxId) {
-    return buildBasePresetBytes(preset.title, baseAmpFxId);
+    return buildBasePresetBytes(preset.title, baseAmpFxId, baseCabFxId ?? '');
   }
 
   const buffer = decodeTemplate();
@@ -164,8 +165,9 @@ function slugify(title: string): string {
 export function downloadPreset(
   preset: GeneratedPreset,
   baseAmpFxId?: string,
+  baseCabFxId?: string,
 ): void {
-  const buffer = buildPresetBuffer(preset, baseAmpFxId);
+  const buffer = buildPresetBuffer(preset, baseAmpFxId, baseCabFxId);
   const jsonStr = '[' + buffer.join(',') + ']';
   const b64 = btoa(jsonStr);
 

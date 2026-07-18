@@ -1,8 +1,8 @@
 // Dynamic base tone presets. Instead of shipping one physical .prst file per
 // amp+cab combination, we ship a SINGLE binary template (twd_deluxe) and inject
-// the amp fxId at its known offset (161, 4-byte LE) plus the preset name at
-// runtime. The cab is auto-paired by the device from the amp's associationId,
-// so only the amp fxId needs to change.
+// the amp fxId (4-byte LE at offset 161), the cab fxId low byte (offset 165),
+// and the preset name at runtime. The device does NOT auto-pair the cabinet,
+// so both the amp and cab fxIds must be written explicitly.
 //
 // The full amp + cab catalog is read from alg_data.json so every algorithm
 // the device knows about is available — no manual curation required.
@@ -17,6 +17,10 @@ const NAME_END = 44;
 // The amp fxId is stored as a 4-byte little-endian integer at offset 161,
 // preceded by a 0xFF marker byte at offset 160.
 const AMP_FXID_POS = 161;
+
+// The cab fxId is stored immediately after the amp fxId. All cab fxIds share
+// the 0x0A0000XX pattern, so only the low byte varies — it lives at offset 165.
+const CAB_FXID_POS = 165;
 
 export interface BasePreset {
   id: string;
@@ -102,10 +106,11 @@ function encodeString(str: string): number[] {
 
 /**
  * Build a .prst byte array from the single template, injecting the preset
- * name and the amp fxId at their known offsets. The cab is auto-paired by
- * the device from the amp's associationId, so no cab injection is needed.
+ * name, the amp fxId (4-byte LE at offset 161), and the cab fxId low byte
+ * (offset 165). Both amp and cab must be injected — the device does not
+ * auto-pair the cabinet from the amp's associationId.
  */
-export function buildBasePresetBytes(title: string, ampFxId: string): number[] {
+export function buildBasePresetBytes(title: string, ampFxId: string, cabFxId: string): number[] {
   const buffer = decodeTemplate();
 
   // Inject name at [30..44]
@@ -116,13 +121,19 @@ export function buildBasePresetBytes(title: string, ampFxId: string): number[] {
   }
 
   // Inject amp fxId as 4-byte LE at offset 161
-  const fxidNum = Number(ampFxId);
-  if (Number.isFinite(fxidNum)) {
-    const n32 = fxidNum >>> 0;
+  const ampNum = Number(ampFxId);
+  if (Number.isFinite(ampNum)) {
+    const n32 = ampNum >>> 0;
     buffer[AMP_FXID_POS] = n32 & 0xff;
     buffer[AMP_FXID_POS + 1] = (n32 >>> 8) & 0xff;
     buffer[AMP_FXID_POS + 2] = (n32 >>> 16) & 0xff;
     buffer[AMP_FXID_POS + 3] = (n32 >>> 24) & 0xff;
+  }
+
+  // Inject cab fxId low byte at offset 165 (all cabs are 0x0A0000XX)
+  const cabNum = Number(cabFxId);
+  if (Number.isFinite(cabNum)) {
+    buffer[CAB_FXID_POS] = cabNum & 0xff;
   }
 
   return buffer;
