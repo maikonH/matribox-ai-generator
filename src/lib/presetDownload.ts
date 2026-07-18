@@ -5,6 +5,12 @@ import type { GeneratedPreset, PresetModule } from './types';
 // field, the module declaration blocks (algorithm ID + enable flag), and the
 // float32-LE parameter slots below — every other byte (header, prefix,
 // routing gaps, footer) is preserved verbatim from this pristine template.
+//
+// This template is used ONLY when no base preset is selected. When a base
+// preset is selected, its own bytes serve as the template instead, because
+// the new amp+cab-only presets use a different binary layout (different
+// module-block offsets, enable-flag position, and type markers) that the
+// 33-A offsets below do not match.
 const TEMPLATE_B64 =
   'WzMsMiwwLDAsMTYsMTEsMCwxMjgsMCw1LDEsNCwzLDEyLDEsNSwxLDE1LDEwNSwyLDEwNSwxNjQsMiwwLDIsMSw1NCw1MiwyMjIsNzcsNzYsNjksMzIsNzcsNjUsODIsODMsNzIsNjUsNzYsNzYsMCwwLDgyLDc5LDEzMiwzLDIsNTMsMTY5LDEzNiwxMTMsNTQsMTA4LDAsMSw1NSwxNDQsMTY3LDU0LDEwOCwwLDEsMjQ2LDI0OSwyNTUsNTMsMTA4LDAsMSwxMTYsMTI0LDI1MCw1NCwxMDgsMCwxLDE0NCwyMTgsMjUzLDU0LDEwOCwwLDEsMjU0LDI0OSw5NSw1NCwxMDgsMCwxLDE4OCw3LDE1Miw1NCwxMDgsMCwxLDEyMCwxMTYsOTYsMTgwLDExMCwwLDg4LDUwLDE1Niw4LDE0NCwwLDk3LDE0LDEwLDE2NCwxLDQsMSwyNTUsMjU1LDEzLDAsMCwwLDEwMSwyLDE1LDEzMiwyLDEwLDMsMSwxLDIsMyw4LDAsMCwwLDcsNSwwLDYsMTIxLDIsNzYsMTUyLDIsNyw0LDEsMSw1LDAsMiw0LDYsMywyNTUsOTYsMCw0LDExLDAsNywxMCwxNSwzLDksMTA0LDEsMCwxMSwyNTUsMiwwLDAsMTUsMjcsMCwwLDAsNTcsMCwwLDEsMywwLDAsMTIsMywwLDAsNiwzMCwwLDAsMywyOSwwLDAsMTEsMTM2LDcsNDUsMTYsMCwxMTAsMTAsMjMwLDIsMTEyLDIsMCw0LDUsMSwwLDAsMTEyLDY2LDAsMCwxNDgsNjYsMCwwLDEyMCw2NiwwLDAsMTYsNjYsMCwwLDIwLDY2LDEwMCwzLDMyLDUsMTIsMCwyLDIyNCw2NSwwLDAsMTYwLDIwNCwwLDcsNzIsNjcsMCwwLDI1MCw2NywwLDAsNzIsNjYsMTcyLDAsMzIsNSw0LDEsOSwwLDAsMTI4LDE5MiwwLDAsODAsMTkzLDAsMCwxNjAsMTkzLDMyLDksMjIwLDAsNyw5Niw2NSwwLDAsMTM4LDY2LDAsMCwxOTIsNjUsNDAsMTQ4LDEsMywyMDAsNjYsMCwwLDEyOCw2Myw0MCw2MCwwLDU0LDM2LDAsMTI0LDQsNTQsMTA4LDAsNjIsOTIsMCwxMSwzMiw2NiwwLDAsMTM2LDY1LDAsMCwzNiw2NiwwLDAsMjQ4LDY1LDMyLDUsMTg4LDEsMjM3LDEwLDE2LDEyNCw1LDQsNjQsMCwwLDIyNCw2NCwwLDAsMjM2LDE2LDEwOCwzNywxMDgsMjIsMTA4LDAsMjUyLDQsMzIsMywyOSwwLDk2LDMyLDEwLDE3Miw0LDEwOCw1MiwxMDksMTAsNTYsMzIsMTAsOTIsNywxMjQsNSwzMiwxNDksMTMsMCwxLDEyOCwwLDE3NSwyMyw3OCwwLDgwLDE5MywxMDcsOTUsMTMxLDIsNywxLDAsMTU2LDEwMSwxMTIsMCwxMjgsMiwzMiw5LDE2LDAsOTYsNTQsNjAsMTIsMCwxMTMsMTA2LDY5LDEyOCwxMCw0LDgsMSwxNDksNTQsMTcwLDE0OCwxNDksMTQwLDEsNDIsMTcsMCwxLDU1LDQ4LDAsNDIsOTYsMCwxNDAsMSwwLDIsMiwwLDAsMTYsMTIsMCwwLDAsMCwwLDksMSwwLDAsMTI4LDYzLDIwMCwwLDAsNDgsMTcsMCwwXQ==';
 
@@ -178,7 +184,18 @@ function applyParams(buffer: number[], preset: GeneratedPreset): void {
   }
 }
 
-function buildPresetBuffer(preset: GeneratedPreset): number[] {
+function buildPresetBuffer(preset: GeneratedPreset, templateBytes?: number[]): number[] {
+  // When a base preset is selected, use its own bytes as the template. The
+  // amp+cab are already at the correct offsets and already active, so we
+  // only overwrite the preset name — no module or param injection. The new
+  // amp+cab-only presets use a different binary layout from the 33-A
+  // template, so writing to 33-A offsets would corrupt them.
+  if (templateBytes && templateBytes.length > 0) {
+    const buffer = [...templateBytes];
+    applyName(buffer, preset.title);
+    return buffer;
+  }
+
   const buffer = decodeTemplate();
   applyName(buffer, preset.title);
   applyModules(buffer, preset.modules);
@@ -196,8 +213,8 @@ function slugify(title: string): string {
     .replace(/^_|_$/g, '');
 }
 
-export function downloadPreset(preset: GeneratedPreset): void {
-  const buffer = buildPresetBuffer(preset);
+export function downloadPreset(preset: GeneratedPreset, templateBytes?: number[]): void {
+  const buffer = buildPresetBuffer(preset, templateBytes);
   const jsonStr = '[' + buffer.join(',') + ']';
   const b64 = btoa(jsonStr);
 

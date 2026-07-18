@@ -103,10 +103,11 @@ export default function App() {
 
   const handleDownload = useCallback(() => {
     if (preset) {
-      downloadPreset(preset);
+      const base = getBasePreset(selectedBaseId ?? '');
+      downloadPreset(preset, base?.bytes);
       showToast('Download do preset iniciado.', 'success');
     }
-  }, [preset, showToast]);
+  }, [preset, selectedBaseId, showToast]);
 
   return (
     <div className="min-h-screen bg-[#030712] text-slate-200">
