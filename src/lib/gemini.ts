@@ -41,6 +41,20 @@ REGRAS OBRIGATÓRIAS:
 5. Cada parâmetro deve estar dentro do range [min, max] do algoritmo correspondente.
 6. A descrição do preset deve ser textual, conceitual e detalhada sobre o timbre, estilo musical e contexto de uso.
 
+ESCOLHA DE ALGORITMOS — SEJA CRIATIVO E FIEL À DESCRIÇÃO:
+- Analise RIGOROSAMENTE a descrição do usuário. Cada palavra importa: gênero, intensidade, referências de artista, década, clima. NUNCA use um algoritmo padrão por preguiça — escolha o que melhor representa o pedido.
+- VARIE os blocos a cada geração. Não repita sempre a mesma cadeia. Dois prompts parecidos podem gerar timbres diferentes se o contexto mudar.
+- AMP: escolha o amplificador condizente com o estilo:
+  * Metal pesado / djent / hardcore → amps high-gain (ex.: Bog SV OD, Dragon, Euro Blue, Uber)
+  * Hard rock / clássico → amps de ganho médio-alto (ex.: Brit 800, Plexi, J45)
+  * Blues / vintage → amps vintage low-watt (ex.: B-Man, TWD Deluxe, Dark Deluxe)
+  * Pop / funk / limpo → amps clean (ex.: Supero CL, Voks CL, TWD Lux)
+  * Fusion / crunch → amps de break-up (ex.: Voks 30, B-Man, Dark Deluxe)
+- CAB: escolha a caixa que combina com o amp e o estilo (1x12 para estúdio íntimo, 4x12 para palco, 2x12 para equilíbrio).
+- DRIVE: só use pedais de drive quando o estilo pedir saturação extra. Para tons limpos, use drive com gain baixo ou prefira EQ/Volume. Varie o tipo de drive (overdrive, distortion, fuzz) conforme o pedido.
+- MOD, DELAY, REVERB: ajuste aos efeitos típicos do gênero (chorus para funk, long delay para ambient, spring reverb para surf, etc.). Não inclua efeito que não combine só para preencher o slot — use parâmetros discretos quando necessário.
+- NÃO existe um "preset padrão". Se a descrição for genérica, interprete o clima predominante e faça uma escolha artística, nunca a mesma de sempre.
+
 FORMATO DE RESPOSTA (JSON estrito):
 {
   "title": "Nome do Preset",
@@ -49,14 +63,14 @@ FORMATO DE RESPOSTA (JSON estrito):
   "volume": 95,
   "modules": [
     {
-      "fxId": "drive_tube808",
-      "fxTitle": "Tube 808 Drive",
+      "fxId": "<fxId numérico da lista>",
+      "fxTitle": "<fxTitle exato da lista>",
       "type": "DRIVE",
       "subType": "DRIVE",
       "params": [
-        { "name": "gain", "value": 35 },
-        { "name": "tone", "value": 50 },
-        { "name": "level", "value": 70 }
+        { "name": "<nome do param>", "value": 0 },
+        { "name": "<nome do param>", "value": 0 },
+        { "name": "<nome do param>", "value": 0 }
       ]
     }
   ]
