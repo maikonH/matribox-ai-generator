@@ -1,5 +1,4 @@
 import type { GeneratedPreset, PresetModule } from './types';
-import { buildBasePresetBytes } from './basePresets';
 
 // Factory template: the 33-A LE MARSHALL preset as a number array. A valid
 // .prst file that loads on the Matribox II Pro. We mutate ONLY the name
@@ -7,8 +6,11 @@ import { buildBasePresetBytes } from './basePresets';
 // float32-LE parameter slots below — every other byte (header, prefix,
 // routing gaps, footer) is preserved verbatim from this pristine template.
 //
-// This template is used ONLY when no base preset is selected. When a base
-// preset is selected, its bytes are built dynamically via buildBasePresetBytes.
+// This single template is used for BOTH paths (with and without a base
+// preset). When a base preset is selected, the amp + cab fxIds from the
+// base preset override the AI's choices in the module declaration blocks,
+// and the amp param values are injected into the float32 slots at
+// offsets 216–232.
 const TEMPLATE_B64 =
   'WzMsMiwwLDAsMTYsMTEsMCwxMjgsMCw1LDEsNCwzLDEyLDEsNSwxLDE1LDEwNSwyLDEwNSwxNjQsMiwwLDIsMSw1NCw1MiwyMjIsNzcsNzYsNjksMzIsNzcsNjUsODIsODMsNzIsNjUsNzYsNzYsMCwwLDgyLDc5LDEzMiwzLDIsNTMsMTY5LDEzNiwxMTMsNTQsMTA4LDAsMSw1NSwxNDQsMTY3LDU0LDEwOCwwLDEsMjQ2LDI0OSwyNTUsNTMsMTA4LDAsMSwxMTYsMTI0LDI1MCw1NCwxMDgsMCwxLDE0NCwyMTgsMjUzLDU0LDEwOCwwLDEsMjU0LDI0OSw5NSw1NCwxMDgsMCwxLDE4OCw3LDE1Miw1NCwxMDgsMCwxLDEyMCwxMTYsOTYsMTgwLDExMCwwLDg4LDUwLDE1Niw4LDE0NCwwLDk3LDE0LDEwLDE2NCwxLDQsMSwyNTUsMjU1LDEzLDAsMCwwLDEwMSwyLDE1LDEzMiwyLDEwLDMsMSwxLDIsMyw4LDAsMCwwLDcsNSwwLDYsMTIxLDIsNzYsMTUyLDIsNyw0LDEsMSw1LDAsMiw0LDYsMywyNTUsOTYsMCw0LDExLDAsNywxMCwxNSwzLDksMTA0LDEsMCwxMSwyNTUsMiwwLDAsMTUsMjcsMCwwLDAsNTcsMCwwLDEsMywwLDAsMTIsMywwLDAsNiwzMCwwLDAsMywyOSwwLDAsMTEsMTM2LDcsNDUsMTYsMCwxMTAsMTAsMjMwLDIsMTEyLDIsMCw0LDUsMSwwLDAsMTEyLDY2LDAsMCwxNDgsNjYsMCwwLDEyMCw2NiwwLDAsMTYsNjYsMCwwLDIwLDY2LDEwMCwzLDMyLDUsMTIsMCwyLDIyNCw2NSwwLDAsMTYwLDIwNCwwLDcsNzIsNjcsMCwwLDI1MCw2NywwLDAsNzIsNjYsMTcyLDAsMzIsNSw0LDEsOSwwLDAsMTI4LDE5MiwwLDAsODAsMTkzLDAsMCwxNjAsMTkzLDMyLDksMjIwLDAsNyw5Niw2NSwwLDAsMTM4LDY2LDAsMCwxOTIsNjUsNDAsMTQ4LDEsMywyMDAsNjYsMCwwLDEyOCw2Myw0MCw2MCwwLDU0LDM2LDAsMTI0LDQsNTQsMTA4LDAsNjIsOTIsMCwxMSwzMiw2NiwwLDAsMTM2LDY1LDAsMCwzNiw2NiwwLDAsMjQ4LDY1LDMyLDUsMTg4LDEsMjM3LDEwLDE2LDEyNCw1LDQsNjQsMCwwLDIyNCw2NCwwLDAsMjM2LDE2LDEwOCwzNywxMDgsMjIsMTA4LDAsMjUyLDQsMzIsMywyOSwwLDk2LDMyLDEwLDE3Miw0LDEwOCw1MiwxMDksMTAsNTYsMzIsMTAsOTIsNywxMjQsNSwzMiwxNDksMTMsMCwxLDEyOCwwLDE3NSwyMyw3OCwwLDgwLDE5MywxMDcsOTUsMTMxLDIsNywxLDAsMTU2LDEwMSwxMTIsMCwxMjgsMiwzMiw5LDE2LDAsOTYsNTQsNjAsMTIsMCwxMTMsMTA2LDY5LDEyOCwxMCw0LDgsMSwxNDksNTQsMTcwLDE0OCwxNDksMTQwLDEsNDIsMTcsMCwxLDU1LDQ4LDAsNDIsOTYsMCwxNDAsMSwwLDIsMiwwLDAsMTYsMTIsMCwwLDAsMCwwLDksMSwwLDAsMTI4LDYzLDIwMCwwLDAsNDgsMTcsMCwwXQ==';
 
@@ -23,7 +25,13 @@ const MODULE_DECL_COUNT = 8;
 const MODULE_DECL_SIZE = 7;
 
 // AI module index → template declaration slot index.
+// AI modules: 0=DRIVE, 1=AMP, 2=CAB, 3=EQ, 4=MOD, 5=DELAY, 6=REVERB, 7=VOLUME
+// Template slots: 0=DRIVE, 1=CAB, 2=AMP, 3=EQ, 4=MOD, 5=DELAY, 6=REVERB, 7=VOLUME
 const SLOT_MAP = [0, 2, 1, 3, 4, 5, 6, 7];
+
+// AI module indices for AMP and CAB — used to override with base preset fxIds.
+const AMP_MODULE_IDX = 1;
+const CAB_MODULE_IDX = 2;
 
 interface ParamSlot {
   pos: number;
@@ -32,12 +40,21 @@ interface ParamSlot {
   isSwitch?: boolean;
 }
 
+// Amp param slots (moduleIdx=1, the AMP module). These are Float32 LE values
+// at 4-byte-aligned offsets in the template. The standard knob order on the
+// device screen is: Gain, Presence, Volume, Bass, Middle, Treble.
+// The template stores 5 of the 6 amp params as float32; the 6th (Treble) is
+// not present in this template and uses the device default.
+const AMP_PARAM_SLOTS: ParamSlot[] = [
+  { pos: 216, moduleIdx: 1, paramIdx: 0 }, // Gain
+  { pos: 220, moduleIdx: 1, paramIdx: 1 }, // Presence
+  { pos: 224, moduleIdx: 1, paramIdx: 2 }, // Volume
+  { pos: 228, moduleIdx: 1, paramIdx: 3 }, // Bass
+  { pos: 232, moduleIdx: 1, paramIdx: 4 }, // Middle
+];
+
 const PARAM_SLOTS: ParamSlot[] = [
-  { pos: 216, moduleIdx: 1, paramIdx: 0 },
-  { pos: 220, moduleIdx: 1, paramIdx: 1 },
-  { pos: 224, moduleIdx: 1, paramIdx: 2 },
-  { pos: 228, moduleIdx: 1, paramIdx: 3 },
-  { pos: 232, moduleIdx: 1, paramIdx: 4 },
+  ...AMP_PARAM_SLOTS,
   { pos: 253, moduleIdx: 5, paramIdx: 0 },
   { pos: 257, moduleIdx: 5, paramIdx: 1 },
   { pos: 268, moduleIdx: 3, paramIdx: 0 },
@@ -138,17 +155,23 @@ function buildPresetBuffer(
   baseAmpFxId?: string,
   baseCabFxId?: string,
 ): number[] {
-  // When a base preset is selected, build the bytes dynamically from the
-  // single twd_deluxe template, injecting the preset name, amp fxId, and
-  // cab fxId at their known offsets.
-  if (baseAmpFxId) {
-    return buildBasePresetBytes(preset.title, baseAmpFxId, baseCabFxId ?? '');
-  }
-
   const buffer = decodeTemplate();
   applyName(buffer, preset.title);
-  applyModules(buffer, preset.modules);
-  applyParams(buffer, preset);
+
+  // When a base preset is selected, override the AMP and CAB module fxIds
+  // with the base preset's algorithms so the downloaded .prst preserves the
+  // exact amp + cab the user picked, regardless of what the AI returned.
+  let modules = preset.modules;
+  if (baseAmpFxId) {
+    modules = modules.map((mod, i) => {
+      if (i === AMP_MODULE_IDX) return { ...mod, fxId: baseAmpFxId };
+      if (i === CAB_MODULE_IDX && baseCabFxId) return { ...mod, fxId: baseCabFxId };
+      return mod;
+    });
+  }
+
+  applyModules(buffer, modules);
+  applyParams(buffer, { ...preset, modules });
   return buffer;
 }
 

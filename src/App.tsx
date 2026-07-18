@@ -104,9 +104,10 @@ export default function App() {
   const handleDownload = useCallback(() => {
     if (preset) {
       const base = getBasePreset(selectedBaseId ?? '');
-      // When no base was manually selected, use the amp fxId the AI chose
-      // (module index 1 = AMP slot) so buildBasePresetBytes is called and
-      // the amp byte injection works exactly as with a manual selection.
+      // When no base was manually selected, use the amp + cab fxIds the AI
+      // chose (modules 1 and 2) so the module declaration blocks are written
+      // with valid algorithm IDs and amp params are injected into the float32
+      // slots at offsets 216–232.
       const ampFxId = base?.ampFxId ?? preset.modules[1]?.fxId;
       const cabFxId = base?.cabFxId ?? preset.modules[2]?.fxId;
       downloadPreset(preset, ampFxId, cabFxId);
