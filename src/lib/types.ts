@@ -28,6 +28,7 @@ export interface PresetModule {
   fxTitle: string;
   type: string;
   subType: string;
+  enabled?: boolean;
   params: PresetModuleParam[];
 }
 
