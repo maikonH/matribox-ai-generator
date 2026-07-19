@@ -21,6 +21,90 @@ const DRV_PEDALS = new Set([
   'Dist Plus', 'Shark', 'Strive', 'Sardar Dist', 'Bass OD', 'Bass Dist',
 ]);
 
+// Canonical amp → cabinet pairings used to auto-fill the CAB slot when the
+// model omits it or picks an unrelated cabinet. Keys are AMP fxTitles from
+// alg_data.json; values are CAB fxTitles.
+const AMP_CAB_PAIRINGS: Record<string, string> = {
+  'Tweed Lux': 'Tweed Lux 1x12',
+  'Baseman Norm': 'Baseman 4x10',
+  'Baseman Bright': 'Baseman 4x10',
+  'Black Twin': 'Black Twin 2x12',
+  'Black Deluxe': 'Black Lux 1x12',
+  'Superb Dual Clean': 'Superb 2x12',
+  'Superb Dual Drive': 'Superb 2x12',
+  'Voxy 15 TB': 'Voxy 1x12',
+  'Voxy 30HW Norm': 'Voxy 2x12',
+  'Voxy 30HW TB': 'Voxy 2x12',
+  'Jazz Clean': 'Jazz Twin 2x12',
+  'Emperor Clean': 'Emperor 2x12',
+  'Emperor Drive': 'Emperor 2x12',
+  'Superstar Clean': 'Superstar 2x12',
+  'Superstar Drive': 'Superstar 2x12',
+  'Glacian Clean': 'Glacian 1x12',
+  'Glacian Drive': 'Glacian 1x12',
+  'Boger XT Blue V': 'Boger 4x12',
+  'Boger XT Red M': 'Boger 4x12',
+  'Dr. 38 Clean': 'US Studio 1x12',
+  'Dr. 38 Drive': 'US Studio 1x12',
+  'Pendragon Clean': 'UK Green 4x12',
+  'Pendragon Clean+': 'UK Modern 4x12',
+  'Pendragon Drive': 'UK Modern 4x12',
+  'Soloist 100 Clean': 'Soloist 4x12',
+  'Soloist 100 Crunch': 'Soloist 4x12',
+  'Soloist 100 Lead': 'Soloist 4x12',
+  'Marshell 45': 'UK Green 4x12',
+  'Marshell 45+': 'UK Green 4x12',
+  'Marshell 45 Jump': 'UK Green 4x12',
+  'Marshell 50': 'UK Lead 4x12',
+  'Marshell 50+': 'UK Lead 4x12',
+  'Marshell 50 Jump': 'UK Lead 4x12',
+  'Marshell SLP': 'UK Lead 4x12',
+  'Marshell 800': 'UK Lead 4x12',
+  'Marshell 900': 'UK T75 4x12',
+  'Fryman B1': 'UK Green 4x12',
+  'Fryman B2': 'UK Green 4x12',
+  'Fryman HB+': 'UK Green 4x12',
+  'Fryman HB': 'UK Green 4x12',
+  'Messe IIC+ 1': 'UK Black 4x12',
+  'Messe IIC+ 2': 'UK Black 4x12',
+  'Messe IIC+ 3': 'UK Black 4x12',
+  'Messe IV Lead 1': 'UK Black 4x12',
+  'Messe IV Lead 2': 'UK Black 4x12',
+  'Messe IV Lead 3': 'UK Black 4x12',
+  'Rector Dual V': 'Rector 4x12',
+  'Rector Dual M': 'Rector 4x12',
+  'Tangerine R100': 'Tang 4x12',
+  'Eddie 51': 'Eddie 4x12',
+  'Engle Saga 1': 'Engle 4x12',
+  'Engle Saga 2': 'Engle 4x12',
+  'Dizzle VH B': 'Dizzle 4x12',
+  'Dizzle VH S': 'Dizzle 4x12',
+  'Dizzle VH+ B': 'Dizzle 4x12',
+  'Dizzle VH+ S': 'Dizzle 4x12',
+  'Ampage Classic': 'Ampage 4x10',
+  'Voxy Bass': 'Voxy 1x12',
+  'Messe Bass 400': 'US Bass 2x10',
+  'Ampage Flip': 'Ampage 4x10',
+  'Alchemy Pre': 'UK Green 4x12',
+  'Acoustic Preamp 1': 'Dreadnought 1',
+  'Acoustic Preamp 2': 'Dreadnought 2',
+};
+
+// Master volume level inferred from the gain structure when the model does
+// not supply a usable VOLUME value. High-gain → quieter master; clean → louder.
+function inferVolumeLevel(ampTitle: string, driveTitle: string | undefined): number {
+  const amp = ampTitle.toLowerCase();
+  const drv = (driveTitle || '').toLowerCase();
+  const highGainAmps = ['marshell', 'pendragon', 'soloist', 'rector', 'boger', 'dizzle', 'engle', 'messe', 'tangerine', 'fryman hb'];
+  const highGainDrives = ['fuzz', 'dist', 'master dist', 'plexi', 'dark mouse', 'sardar'];
+  const isHighGainAmp = highGainAmps.some((k) => amp.includes(k));
+  const isHighGainDrive = highGainDrives.some((k) => drv.includes(k));
+  if (isHighGainAmp || isHighGainDrive) return 65;
+  const midGainAmps = ['superb dual drive', 'emperor drive', 'dr. 38 drive', 'glacian drive', 'superstar drive', 'marshell 45', 'voxy 30hw'];
+  if (midGainAmps.some((k) => amp.includes(k))) return 78;
+  return 90;
+}
+
 function buildSystemPrompt(algorithms: Algorithm[]): string {
   const algList = algorithms
     .map((a) => {
@@ -44,11 +128,11 @@ HARD RULES:
 2. Use ONLY fxId + fxTitle values that exist in the list above.
 3. Emit EXACTLY 8 modules in this fixed order: DRIVE, AMP, CAB, EQ, MOD, DELAY, REVERB, VOLUME. Never reorder, never skip a slot, never add a ninth module.
 4. Parameter counts per slot: DRIVE(3), AMP(5), CAB(3), EQ(3), MOD(3), DELAY(2), REVERB(4), VOLUME(1). Each value must be a plain number inside the algorithm's [min, max] range.
-5. AMP slot: exactly ONE real amplifier from the AMP section. CAB slot: exactly ONE real cabinet from the CAB section, and it must be the natural match for the chosen amp (e.g. Brit 800 → Brit LD 4x12, B-Man N → B-Man 2x10, Supero 2 CL → Supero 2x12). Stacking multiple AMP blocks, duplicating "Dr. 38 Clean" / any amp, or inserting loops is strictly prohibited.
+5. MANDATORY AMP & CAB: The preset chain MUST ALWAYS feature exactly ONE active, valid AMPLIFIER model in the AMP slot and exactly ONE valid CABINET model in the CAB slot, both selected directly from the ${algorithms.length} catalog entries above. They are strictly mandatory — they CANNOT be left empty, blank, null, or bypassed, and you MUST NOT emit a placeholder like "AMP (vazio)" or "CAB (vazio)". The cabinet must be the natural match for the chosen amp (e.g. Black Twin → Black Twin 2x12, Baseman Norm → Baseman 4x10, Voxy 30HW TB → Voxy 2x12, Marshell 800 → UK Lead 4x12, Pendragon Drive → UK Modern 4x12). Stacking multiple AMP blocks, duplicating any amp, or inserting loops is strictly prohibited.
 6. DRIVE slot: may ONLY hold a real overdrive/distortion/fuzz pedal from the DRV section (e.g. Bass OD, Tube 808, Skreamer 9, Fuzz Cream, Master Dist). Never put an AMP, CAB, MOD, or EQ algorithm in the DRIVE slot. If the prompt is for a clean tone, still pick a real DRV pedal and set its gain low.
 7. MOD slot: modulation only. Map "Flanger" and "Phaser" (and variants like Flanger N, Phaser ST, BBD Phaser) to this slot — they are MOD algorithms, never DRIVE or AMP. Same for chorus, tremolo, vibrato, vibe, detune.
 8. Choose creatively per prompt: match amp + cab + drive + modulation to the genre, decade, and reference artist the user names. Vary between generations; do not default to one "standard" preset.
-9. Master Volume (VOLUME slot) is computed dynamically from the gain structure: high-gain amps + heavy drive → 55–75; mid-gain crunch → 72–85; clean/boutique low-gain → 85–100. Never hardcode 90.
+9. MANDATORY VOLUME: The final VOLUME slot MUST ALWAYS load the standard factory volume pedal algorithm from the catalog (fxTitle "Volume") — it can NEVER be left empty or null. Its single parameter is the master volume level, computed dynamically from the gain structure: high-gain amps + heavy drive → 55–75; mid-gain crunch → 72–85; clean/boutique low-gain → 85–100. Never hardcode 90, never leave the VOLUME slot blank.
 
 RESPONSE FORMAT (strict Matribox II Pro JSON):
 {
@@ -136,8 +220,61 @@ function reconcilePreset(raw: MatriboxPreset, algorithms: Algorithm[]): Generate
 
   for (const slot of SLOT_ORDER) {
     const hitIdx = incoming.findIndex((m, i) => !used.has(i) && m.type === slot);
+
+    // MANDATORY SLOT FILLING — AMP, CAB and VOLUME can never be empty. If the
+    // model omitted them, auto-fill from the catalog so the chain always has a
+    // real amp, its matched cabinet, and the factory volume pedal.
     if (hitIdx === -1) {
-      // Slot missing — leave a placeholder that the caller can still render.
+      if (slot === 'AMP') {
+        const fallbackAmp = algorithms.find((a) => a.type === 'AMP')!;
+        ordered.push({
+          fxId: fallbackAmp.fxId,
+          fxTitle: fallbackAmp.fxTitle,
+          type: 'AMP',
+          subType: 'AMP',
+          params: fallbackAmp.params.map((p) => ({
+            name: p.name, displayName: p.displayName, value: p.value,
+            min: p.min, max: p.max, unit: p.unit,
+          })),
+        });
+        continue;
+      }
+      if (slot === 'CAB') {
+        const chosenAmp = ordered.find((m) => m.type === 'AMP');
+        const pairedCabTitle = chosenAmp ? AMP_CAB_PAIRINGS[chosenAmp.fxTitle] : undefined;
+        const cabAlg = (pairedCabTitle && byTitle.get(pairedCabTitle.toLowerCase()))
+          || algorithms.find((a) => a.type === 'CAB')!;
+        ordered.push({
+          fxId: cabAlg.fxId,
+          fxTitle: cabAlg.fxTitle,
+          type: 'CAB',
+          subType: 'CAB',
+          params: cabAlg.params.map((p) => ({
+            name: p.name, displayName: p.displayName, value: p.value,
+            min: p.min, max: p.max, unit: p.unit,
+          })),
+        });
+        continue;
+      }
+      if (slot === 'VOLUME') {
+        const volAlg = algorithms.find((a) => a.type === 'VOL' || a.fxTitle === 'Volume')!;
+        const chosenAmp = ordered.find((m) => m.type === 'AMP');
+        const chosenDrive = ordered.find((m) => m.type === 'DRIVE');
+        const level = inferVolumeLevel(chosenAmp?.fxTitle || '', chosenDrive?.fxTitle);
+        ordered.push({
+          fxId: volAlg.fxId,
+          fxTitle: volAlg.fxTitle,
+          type: 'VOLUME',
+          subType: 'VOLUME',
+          params: volAlg.params.map((p, i) => ({
+            name: p.name, displayName: p.displayName,
+            value: i === 0 ? clampParam(level, p.min, p.max) : p.value,
+            min: p.min, max: p.max, unit: p.unit,
+          })),
+        });
+        continue;
+      }
+      // Non-mandatory slot missing — leave a placeholder.
       ordered.push({
         fxId: '',
         fxTitle: `${slot} (vazio)`,
@@ -147,6 +284,7 @@ function reconcilePreset(raw: MatriboxPreset, algorithms: Algorithm[]): Generate
       });
       continue;
     }
+
     used.add(hitIdx);
     const { mod, fxId, alg } = incoming[hitIdx];
 
@@ -158,6 +296,27 @@ function reconcilePreset(raw: MatriboxPreset, algorithms: Algorithm[]): Generate
       if (!alg || !DRV_PEDALS.has(alg.fxTitle)) {
         resolvedAlg = algorithms.find((a) => DRV_PEDALS.has(a.fxTitle)) ?? alg;
       }
+    }
+    // AMP slot must hold a real amplifier from the catalog.
+    if (slot === 'AMP') {
+      if (!alg || alg.type !== 'AMP') {
+        resolvedAlg = algorithms.find((a) => a.type === 'AMP') ?? alg;
+      }
+    }
+    // CAB slot must hold a real cabinet; if the model picked one that doesn't
+    // match the chosen amp, swap in the canonical pairing when available.
+    if (slot === 'CAB') {
+      if (!alg || alg.type !== 'CAB') {
+        const chosenAmp = ordered.find((m) => m.type === 'AMP');
+        const pairedCabTitle = chosenAmp ? AMP_CAB_PAIRINGS[chosenAmp.fxTitle] : undefined;
+        resolvedAlg = (pairedCabTitle && byTitle.get(pairedCabTitle.toLowerCase()))
+          || (algorithms.find((a) => a.type === 'CAB') ?? alg);
+      }
+    }
+    // VOLUME slot must always load the factory volume pedal algorithm.
+    if (slot === 'VOLUME') {
+      const volAlg = algorithms.find((a) => a.type === 'VOL' || a.fxTitle === 'Volume');
+      if (volAlg) resolvedAlg = volAlg;
     }
 
     const flatParams = Array.isArray(mod.parameters)
@@ -201,6 +360,17 @@ function reconcilePreset(raw: MatriboxPreset, algorithms: Algorithm[]): Generate
         min: 0,
         max: 100,
       }));
+    }
+
+    // For the VOLUME slot, force the first param to the dynamic master level
+    // when the model didn't supply a believable value.
+    if (slot === 'VOLUME' && params.length > 0) {
+      const chosenAmp = ordered.find((m) => m.type === 'AMP');
+      const chosenDrive = ordered.find((m) => m.type === 'DRIVE');
+      const level = inferVolumeLevel(chosenAmp?.fxTitle || '', chosenDrive?.fxTitle);
+      params = params.map((p, i) =>
+        i === 0 ? { ...p, value: clampParam(level, p.min, p.max) } : p,
+      );
     }
 
     ordered.push({
