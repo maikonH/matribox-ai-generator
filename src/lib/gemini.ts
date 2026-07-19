@@ -4,7 +4,7 @@ import { findAlgorithm } from './algorithmStore';
 import { getEffectiveApiKey } from './apiKeyStore';
 import type { BasePreset } from './basePresets';
 
-const MODEL_NAME = 'gemini-3.1-flash-lite';
+const MODEL_NAME = 'gemini-3.5-flash';
 
 function buildSystemPrompt(algorithms: Algorithm[], basePreset?: BasePreset | null): string {
   const algList = algorithms
