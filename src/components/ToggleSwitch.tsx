@@ -21,7 +21,7 @@ export default function ToggleSwitch({ param, onChange }: Props) {
         onClick={() => onChange(isOn ? 0 : 1)}
         className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wide leading-none transition-all duration-200 focus:outline-none ${
           isOn
-            ? 'bg-success-500 text-white border border-success-400 shadow-glow'
+            ? 'bg-primary-500 text-white border border-primary-400 shadow-[0_0_8px_-1px_rgba(34,211,238,0.6)]'
             : 'bg-surface-light text-muted border border-border'
         }`}
       >

@@ -30,7 +30,7 @@ export default function PromptBar({ value, onChange, onSubmit, loading, onQuickP
           }}
           placeholder="Descreva o timbre que você quer gerar..."
           disabled={loading}
-          className="flex-1 h-12 rounded-xl bg-bg-700 border border-border px-4 text-sm text-white placeholder:text-subtext focus:outline-none focus:border-success-500/50 focus:ring-2 focus:ring-success-500/50 transition-all disabled:opacity-50"
+          className="flex-1 h-12 rounded-xl bg-bg-700 border border-border px-4 text-sm text-white placeholder:text-subtext focus:outline-none focus:border-primary-500/50 focus:ring-2 focus:ring-primary-500/50 transition-all disabled:opacity-50"
         />
         <button
           onClick={onSubmit}
@@ -52,7 +52,7 @@ export default function PromptBar({ value, onChange, onSubmit, loading, onQuickP
             key={prompt}
             onClick={() => onQuickPrompt(prompt)}
             disabled={loading}
-            className="px-3 py-1.5 rounded-full bg-surface-light border border-border text-xs text-muted hover:text-success-400 hover:border-success-500/40 transition-all disabled:opacity-50"
+            className="px-3 py-1.5 rounded-full bg-surface-light border border-border text-xs text-muted hover:text-primary-400 hover:border-primary-500/40 transition-all disabled:opacity-50"
           >
             {prompt}
           </button>

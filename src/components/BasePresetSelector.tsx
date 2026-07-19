@@ -45,7 +45,7 @@ export default function BasePresetSelector({
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 text-xs text-slate-400">
-        <Guitar className="w-4 h-4 text-success-500" />
+        <Guitar className="w-4 h-4 text-primary-400" />
         <span className="font-semibold uppercase tracking-wider">Tom Base (Amp + Cab)</span>
       </div>
 
@@ -54,7 +54,7 @@ export default function BasePresetSelector({
           type="button"
           disabled={disabled}
           onClick={() => setOpen((v) => !v)}
-          className="w-full h-12 rounded-xl bg-bg-700 border border-border px-4 text-left text-sm text-white flex items-center justify-between gap-3 hover:border-success-500/40 focus:outline-none focus:border-success-500/50 focus:ring-2 focus:ring-success-500/50 transition-all disabled:opacity-50"
+          className="w-full h-12 rounded-xl bg-bg-700 border border-border px-4 text-left text-sm text-white flex items-center justify-between gap-3 hover:border-primary-500/40 focus:outline-none focus:border-primary-500/50 focus:ring-2 focus:ring-primary-500/50 transition-all disabled:opacity-50"
         >
           <span className="truncate">
             {selected ? (
@@ -83,7 +83,7 @@ export default function BasePresetSelector({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Buscar amp…"
-                  className="w-full h-8 rounded-lg bg-bg-900 border border-border pl-8 pr-3 text-xs text-white placeholder:text-subtext focus:outline-none focus:border-success-500/50 focus:ring-2 focus:ring-success-500/50"
+                  className="w-full h-8 rounded-lg bg-bg-900 border border-border pl-8 pr-3 text-xs text-white placeholder:text-subtext focus:outline-none focus:border-primary-500/50 focus:ring-2 focus:ring-primary-500/50"
                 />
               </div>
             </div>
@@ -95,7 +95,7 @@ export default function BasePresetSelector({
                   setOpen(false);
                 }}
                 className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between gap-2 hover:bg-surface-light/50 transition-colors ${
-                  !selected ? 'text-success-400' : 'text-muted'
+                  !selected ? 'text-primary-400' : 'text-muted'
                 }`}
               >
                 <span>Nenhum (IA escolhe o amp)</span>
@@ -111,7 +111,7 @@ export default function BasePresetSelector({
                     setOpen(false);
                   }}
                   className={`w-full px-4 py-2.5 text-left text-sm flex items-start justify-between gap-2 hover:bg-surface-light/50 transition-colors ${
-                    selectedId === bp.id ? 'text-success-400' : 'text-slate-300'
+                    selectedId === bp.id ? 'text-primary-400' : 'text-slate-300'
                   }`}
                 >
                   <span className="flex flex-col min-w-0">

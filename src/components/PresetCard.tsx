@@ -13,10 +13,10 @@ export default function PresetCard({ preset, loading, onParamChange }: Props) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
         <div className="relative mb-6">
-          <div className="w-16 h-16 rounded-full bg-success-500/15 flex items-center justify-center">
-            <Loader2 className="w-8 h-8 text-success-500 animate-spin" />
+          <div className="w-16 h-16 rounded-full bg-primary-500/15 flex items-center justify-center">
+            <Loader2 className="w-8 h-8 text-primary-400 animate-spin" />
           </div>
-          <div className="absolute inset-0 rounded-full bg-success-500/10 blur-2xl animate-pulse" />
+          <div className="absolute inset-0 rounded-full bg-primary-500/10 blur-2xl animate-pulse" />
         </div>
         <p className="text-white font-semibold text-sm">Gerando preset com IA...</p>
         <p className="text-slate-500 text-xs mt-1">Analisando algoritmos e montando a cadeia de sinal</p>
@@ -54,17 +54,17 @@ export default function PresetCard({ preset, loading, onParamChange }: Props) {
 
         <div className="flex flex-wrap gap-3 pt-4 border-t border-border">
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-light border border-border">
-            <Volume2 className="w-4 h-4 text-success-500" />
+            <Volume2 className="w-4 h-4 text-primary-400" />
             <span className="text-xs text-muted">Vol:</span>
             <span className="text-xs font-mono font-semibold text-white tabular-nums">{preset.volume}</span>
           </div>
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-light border border-border">
-            <Music2 className="w-4 h-4 text-success-500" />
+            <Music2 className="w-4 h-4 text-primary-400" />
             <span className="text-xs text-muted">BPM:</span>
             <span className="text-xs font-mono font-semibold text-white tabular-nums">{preset.bpm}</span>
           </div>
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-light border border-border">
-            <Layers className="w-4 h-4 text-success-500" />
+            <Layers className="w-4 h-4 text-primary-400" />
             <span className="text-xs text-muted">Módulos:</span>
             <span className="text-xs font-mono font-semibold text-white tabular-nums">
               {preset.modules.length}

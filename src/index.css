@@ -14,7 +14,7 @@
 
 @layer components {
   .btn-primary {
-    @apply bg-success-500 text-bg-900 font-bold rounded-xl shadow-glow hover:shadow-glow-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed;
+    @apply bg-primary-500 text-bg-900 font-bold rounded-xl shadow-glow hover:shadow-glow-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed;
   }
 }
 
@@ -48,12 +48,12 @@
 input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  background: #22c55e;
-  box-shadow: 0 0 8px -1px rgba(34, 197, 94, 0.5);
+  background: #22d3ee;
+  box-shadow: 0 0 8px -1px rgba(34, 211, 238, 0.5);
 }
 
 input[type='range']::-moz-range-thumb {
   border: none;
-  background: #22c55e;
-  box-shadow: 0 0 8px -1px rgba(34, 197, 94, 0.5);
+  background: #22d3ee;
+  box-shadow: 0 0 8px -1px rgba(34, 211, 238, 0.5);
 }
