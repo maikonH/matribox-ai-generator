@@ -30,12 +30,12 @@ export default function PromptBar({ value, onChange, onSubmit, loading, onQuickP
           }}
           placeholder="Descreva o timbre que você quer gerar..."
           disabled={loading}
-          className="flex-1 h-12 rounded-xl bg-[#0b0f19] border border-slate-800/80 px-4 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-500/60 focus:ring-2 focus:ring-cyan-500/10 transition-all disabled:opacity-50"
+          className="flex-1 h-12 rounded-xl bg-bg-700 border border-border px-4 text-sm text-white placeholder:text-subtext focus:outline-none focus:border-success-500/50 focus:ring-2 focus:ring-success-500/50 transition-all disabled:opacity-50"
         />
         <button
           onClick={onSubmit}
           disabled={loading || !value.trim()}
-          className="h-12 px-5 sm:px-6 rounded-xl bg-gradient-to-r from-cyan-400 to-sky-500 text-slate-950 font-bold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-cyan-500/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+          className="btn-primary h-12 px-5 sm:px-6 text-sm flex items-center gap-2 shrink-0"
         >
           {loading ? (
             <Loader2 className="w-5 h-5 animate-spin" />
@@ -52,7 +52,7 @@ export default function PromptBar({ value, onChange, onSubmit, loading, onQuickP
             key={prompt}
             onClick={() => onQuickPrompt(prompt)}
             disabled={loading}
-            className="px-3 py-1.5 rounded-full bg-[#0d1527] border border-slate-800/60 text-xs text-slate-400 hover:text-cyan-300 hover:border-cyan-500/40 transition-all disabled:opacity-50"
+            className="px-3 py-1.5 rounded-full bg-surface-light border border-border text-xs text-muted hover:text-success-400 hover:border-success-500/40 transition-all disabled:opacity-50"
           >
             {prompt}
           </button>
