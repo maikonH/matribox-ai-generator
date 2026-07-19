@@ -104,20 +104,14 @@ export default function App() {
   const handleDownload = useCallback(() => {
     if (!preset) return;
 
-    const findModule = (type: string) =>
-      preset.modules.find((m) => m.type === type);
+    const modules = preset.modules
+      .filter((m) => m.enabled !== false)
+      .map((mod) => ({
+        fxId: Number(mod.fxId) || 0,
+        params: mod.params.map((p) => p.value),
+      }));
 
-    const ampModule = findModule('AMP');
-    const cabModule = findModule('CAB');
-
-    const ampFxId = ampModule ? Number(ampModule.fxId) : 0;
-    const cabFxId = cabModule ? Number(cabModule.fxId) : 0;
-
-    const params = preset.modules.flatMap((mod) =>
-      mod.enabled === false ? [] : mod.params.map((p) => p.value),
-    );
-
-    downloadPresetPro(preset.title, ampFxId, cabFxId, params);
+    downloadPresetPro(preset.title, modules);
     showToast('Download do preset iniciado.', 'success');
   }, [preset, showToast]);
 

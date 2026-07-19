@@ -1,7 +1,19 @@
 const PRO_HEADER = [3, 2, 0, 0, 16, 11, 0, 128, 0, 5, 1, 4, 3, 12, 1, 5, 1, 15, 105, 2, 105, 164, 2, 0, 2, 1];
 
-export function downloadPresetPro(name: string, ampFxId: number, cabFxId: number, params: number[]) {
-  const dynamicMatrix = [ampFxId, cabFxId, ...params];
+export interface DownloadModule {
+  fxId: number;
+  params: number[];
+  enabled?: boolean;
+}
+
+export function downloadPresetPro(name: string, modules: DownloadModule[]) {
+  const dynamicMatrix: number[] = [];
+  for (const mod of modules) {
+    if (mod.enabled === false) continue;
+    dynamicMatrix.push(mod.fxId);
+    dynamicMatrix.push(...mod.params);
+  }
+
   const fullArray = [...PRO_HEADER, ...dynamicMatrix];
   const base64Data = btoa(JSON.stringify(fullArray));
 
