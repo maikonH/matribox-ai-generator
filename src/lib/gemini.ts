@@ -295,29 +295,36 @@ function reconcilePreset(raw: MatriboxPreset, algorithms: Algorithm[]): Generate
     used.add(hitIdx);
     const { mod, fxId, alg } = incoming[hitIdx];
 
-    // DRIVE slot must hold a real DRV pedal. If the model placed something
-    // else there, pick the first real DRV pedal as a safe fallback so the red
-    // DRIVE block never renders a non-drive algorithm.
-    let resolvedAlg = alg;
+    // When fxId lookup missed (e.g. model returned hex or wrong int), try
+    // resolving by fxTitle before falling back to type-based defaults.
+    let resolvedAlg = alg
+      ?? (mod.fxTitle ? byTitle.get(mod.fxTitle.toLowerCase()) : undefined);
+
+    // DRIVE slot must hold a real DRV pedal.
     if (slot === 'DRIVE') {
-      if (!alg || !DRV_PEDALS.has(alg.fxTitle)) {
-        resolvedAlg = catalog.find((a) => DRV_PEDALS.has(a.fxTitle)) ?? alg;
+      if (!resolvedAlg || !DRV_PEDALS.has(resolvedAlg.fxTitle)) {
+        resolvedAlg = catalog.find((a) => DRV_PEDALS.has(a.fxTitle)) ?? resolvedAlg;
       }
     }
     // AMP slot must hold a real amplifier from the catalog.
     if (slot === 'AMP') {
-      if (!alg || alg.type !== 'AMP') {
-        resolvedAlg = catalog.find((a) => a.type === 'AMP') ?? alg;
+      if (!resolvedAlg || resolvedAlg.type !== 'AMP') {
+        // Try matching by the fxTitle the AI provided before falling back to first AMP.
+        const titleMatch = mod.fxTitle ? byTitle.get(mod.fxTitle.toLowerCase()) : undefined;
+        resolvedAlg = (titleMatch?.type === 'AMP' ? titleMatch : undefined)
+          ?? catalog.find((a) => a.type === 'AMP')!;
       }
     }
-    // CAB slot must hold a real cabinet; if the model picked one that doesn't
-    // match the chosen amp, swap in the canonical pairing when available.
+    // CAB slot: honour the AI's chosen cabinet when it's valid; otherwise use
+    // the canonical pairing for the chosen amp.
     if (slot === 'CAB') {
-      if (!alg || alg.type !== 'CAB') {
+      if (!resolvedAlg || resolvedAlg.type !== 'CAB') {
         const chosenAmp = ordered.find((m) => m.type === 'AMP');
         const pairedCabTitle = chosenAmp ? AMP_CAB_PAIRINGS[chosenAmp.fxTitle] : undefined;
-        resolvedAlg = (pairedCabTitle && byTitle.get(pairedCabTitle.toLowerCase()))
-          || (catalog.find((a) => a.type === 'CAB') ?? alg);
+        const titleMatch = mod.fxTitle ? byTitle.get(mod.fxTitle.toLowerCase()) : undefined;
+        resolvedAlg = (titleMatch?.type === 'CAB' ? titleMatch : undefined)
+          ?? (pairedCabTitle ? byTitle.get(pairedCabTitle.toLowerCase()) : undefined)
+          ?? catalog.find((a) => a.type === 'CAB')!;
       }
     }
     // VOLUME slot must always load the factory volume pedal algorithm.
@@ -409,10 +416,16 @@ export async function generatePreset(
     );
   }
 
+  // Always feed the full catalog to the model. If the caller passed an empty
+  // array (IndexedDB miss), the AI would otherwise see zero algorithms and
+  // invent fxIds, which forces the reconciler onto its hardcoded fallbacks
+  // (Tweed Lux / Tweed Lux 1x12) for every generation.
+  const effective = algorithms.length > 0 ? algorithms : ALGORITHM_CATALOG;
+
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
     model: MODEL_NAME,
-    systemInstruction: buildSystemPrompt(algorithms),
+    systemInstruction: buildSystemPrompt(effective),
     generationConfig: {
       temperature: 0.7,
       responseMimeType: 'application/json',
@@ -445,5 +458,5 @@ export async function generatePreset(
     }
   }
 
-  return reconcilePreset(parsed, algorithms);
+  return reconcilePreset(parsed, effective);
 }
