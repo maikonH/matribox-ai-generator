@@ -26,6 +26,7 @@ const moduleImageMap: Record<string, string> = {
   DELAY: imgDly,
   REVERB: imgRvb,
   VOLUME: imgVol,
+  VOLUME_PEDAL: imgVol,
   VOL: imgVol,
   WAH: imgWah,
   DYN: imgDyn,
@@ -49,7 +50,7 @@ interface Props {
 
 export default function SignalBlock({ module, index, onParamChange }: Props) {
   const [expanded, setExpanded] = useState(index === 0);
-  const moduleIcon = moduleImageMap[module.type.toUpperCase()];
+  const moduleIcon = moduleImageMap[module.type.toUpperCase().trim()];
 
   return (
     <div className="bg-surface border border-border rounded-xl overflow-hidden transition-all">
