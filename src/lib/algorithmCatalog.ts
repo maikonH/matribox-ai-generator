@@ -1,0 +1,101 @@
+// Single source of truth for the Matribox II Pro algorithm catalog.
+// Imports alg_data.json once at module load and projects every entry into
+// the Algorithm shape used across the app. The resulting list is frozen at
+// 267 entries — the exact contents of src/data/alg_data.json — and is the
+// only algorithm set the AI is ever allowed to draw from.
+//
+// Nothing in this module reads localStorage or IndexedDB, so a browser reset
+// cannot change the catalog or the header counter.
+
+import algData from '../data/alg_data.json';
+import type { Algorithm, AlgorithmParam } from './types';
+
+type Widget = {
+  name: string;
+  ID?: string;
+  defaultValue?: string | number;
+  min?: string | number;
+  max?: string | number;
+  unit?: string;
+};
+
+type AlgEntry = {
+  fxid: number;
+  fxtitle?: string;
+  name?: string;
+  type?: string;
+  descriptionEN?: string;
+  widget?: Widget[];
+};
+
+type AlgModule = {
+  name: string;
+  index: number;
+  alg: AlgEntry[];
+};
+
+function num(v: string | number | undefined, fallback: number): number {
+  if (v === undefined) return fallback;
+  const n = typeof v === 'number' ? v : parseFloat(v);
+  return Number.isNaN(n) ? fallback : n;
+}
+
+function widgetToParams(widget: Widget[] | undefined): AlgorithmParam[] {
+  if (!widget) return [];
+  return widget.map((w) => ({
+    name: w.name,
+    displayName: w.name,
+    min: num(w.min, 0),
+    max: num(w.max, 100),
+    value: num(w.defaultValue, 50),
+    unit: w.unit,
+  }));
+}
+
+const MODULE_DISPLAY: Record<string, string> = {
+  DYN: 'Dynamics',
+  FREQ: 'Filter / Pitch',
+  WAH: 'Wah',
+  DRV: 'Drive',
+  AMP: 'Amplifier',
+  CAB: 'Cabinet',
+  IR: 'Impulse Response',
+  EQ: 'Equalizer',
+  MOD: 'Modulation',
+  DLY: 'Delay',
+  RVB: 'Reverb',
+  CLONE: 'Clone',
+  FXLOOP: 'FX Loop',
+  FXSND: 'FX Send',
+  FXRTN: 'FX Return',
+  VOL: 'Volume',
+};
+
+function buildCatalog(): Algorithm[] {
+  const modules = (algData as { Modules: AlgModule[] }).Modules;
+  const out: Algorithm[] = [];
+  for (const mod of modules) {
+    const type = mod.name;
+    for (const entry of mod.alg ?? []) {
+      out.push({
+        fxId: String(entry.fxid),
+        fxTitle: entry.fxtitle || entry.name || `Algorithm ${entry.fxid}`,
+        type,
+        subType: type,
+        category: MODULE_DISPLAY[type] ?? type,
+        description: entry.descriptionEN || '',
+        params: widgetToParams(entry.widget),
+      });
+    }
+  }
+  return out;
+}
+
+export const ALGORITHM_CATALOG: Algorithm[] = buildCatalog();
+
+// Locked count — the only number the header is allowed to render.
+export const ALGORITHM_COUNT = ALGORITHM_CATALOG.length;
+
+export function getCatalog(): Algorithm[] {
+  return ALGORITHM_CATALOG;
+}

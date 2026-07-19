@@ -2,95 +2,71 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { Algorithm, GeneratedPreset, PresetModule, PresetModuleParam } from './types';
 import { findAlgorithm } from './algorithmStore';
 import { getEffectiveApiKey } from './apiKeyStore';
-import type { BasePreset } from './basePresets';
 
 const MODEL_NAME = 'gemini-3.1-flash-lite';
 
-function buildSystemPrompt(algorithms: Algorithm[], basePreset?: BasePreset | null): string {
+// Fixed signal-chain slot order. The AI must emit modules in this order and
+// the reconcile step enforces it. AMP and CAB each appear exactly once — no
+// stacking, no duplication, no parallel loops.
+const SLOT_ORDER = ['DRIVE', 'AMP', 'CAB', 'EQ', 'MOD', 'DELAY', 'REVERB', 'VOLUME'] as const;
+type Slot = (typeof SLOT_ORDER)[number];
+
+// Real DRV algorithms the AI is allowed to put in the DRIVE slot. fxIds come
+// straight from alg_data.json. Anything outside this set in the DRIVE slot is
+// rejected by the reconcile step.
+const DRV_PEDALS = new Set([
+  'Skreamer', 'Skreamer 9', 'Butter OD', 'Warm OD', 'Super OD', 'Blues OD',
+  'Full OD', 'Breaker OD', 'Gerden OD', 'Timmy OD', 'Master OD', 'Solar Fuzz',
+  'Fuzz Cream', 'Red Fuzz', 'JP Dist', 'Dark Mouse', 'Plexi Dist', 'Master Dist',
+  'Dist Plus', 'Shark', 'Strive', 'Sardar Dist', 'Bass OD', 'Bass Dist',
+]);
+
+function buildSystemPrompt(algorithms: Algorithm[]): string {
   const algList = algorithms
     .map((a) => {
       const params = a.params
-        .map((p) => `    ${p.name} (min:${p.min}, max:${p.max}${p.unit ? ', unit:' + p.unit : ''})`)
+        .map(
+          (p) =>
+            `    ${p.name} (min:${p.min}, max:${p.max}${p.unit ? ', unit:' + p.unit : ''})`,
+        )
         .join('\n');
       return `  - fxId: "${a.fxId}" | fxTitle: "${a.fxTitle}" | type: "${a.type}" | subType: "${a.subType}"\n    params:\n${params}`;
     })
     .join('\n');
 
-  const baseInstruction = basePreset
-    ? `BASE OBRIGATÓRIO: O usuário selecionou o tom base "${basePreset.name}" (${basePreset.ampName} + ${basePreset.cabName}).
-Você DEVE usar obrigatoriamente:
-  - Módulo AMP: fxId="${basePreset.ampFxId}" (fxTitle="${basePreset.ampName}")
-  - Módulo CAB: fxId="${basePreset.cabFxId}" (fxTitle="${basePreset.cabName}")
-NÃO substitua o amplificador nem a caixa — construa o resto da cadeia (DRIVE, EQ, MOD, DELAY, REVERB, VOLUME) AO REDOR deste tom base.
-Descrição do tom base: ${basePreset.description}
+  return `You are the Matribox II Pro tone engineer. You build guitar presets using ONLY the ${algorithms.length} algorithms listed below. This list is your single source of truth — never invent fxIds, fxTitles, or parameters that are not in it.
 
-`
-    : '';
-
-  return `Você é o Matribox II Pro, um engenheiro de som especializado em gerar presets para processadores de guitarra.
-Sua tarefa é criar um preset completo baseado no prompt do usuário, utilizando SOMENTE os algoritmos disponíveis na lista abaixo.
-
-${baseInstruction}ALGORITMOS DISPONÍVEIS (fxId, fxTitle, type, subType, params com min/max):
+AVAILABLE ALGORITHMS (${algorithms.length} total — fxId, fxTitle, type, subType, params with min/max):
 ${algList}
 
-REGRAS OBRIGATÓRIAS:
-1. Responda SEMPRE em JSON válido, sem markdown, sem texto adicional.
-2. Use apenas fxId e fxTitle que existam na lista acima.
-3. Gere EXATAMENTE 8 módulos nesta ordem fixa: DRIVE, AMP, CAB, EQ, MOD, DELAY, REVERB, VOLUME.
-4. Parâmetros por módulo: DRIVE(3), AMP(5), CAB(3), EQ(3), MOD(3), DELAY(2), REVERB(4), VOLUME(1).
-5. Cada parâmetro deve estar dentro do range [min, max] do algoritmo correspondente.
-6. A descrição do preset deve ser textual, conceitual e detalhada sobre o timbre, estilo musical e contexto de uso.
+HARD RULES:
+1. Respond with ONE valid JSON object. No markdown, no commentary, no code fences.
+2. Use ONLY fxId + fxTitle values that exist in the list above.
+3. Emit EXACTLY 8 modules in this fixed order: DRIVE, AMP, CAB, EQ, MOD, DELAY, REVERB, VOLUME. Never reorder, never skip a slot, never add a ninth module.
+4. Parameter counts per slot: DRIVE(3), AMP(5), CAB(3), EQ(3), MOD(3), DELAY(2), REVERB(4), VOLUME(1). Each value must be a plain number inside the algorithm's [min, max] range.
+5. AMP slot: exactly ONE real amplifier from the AMP section. CAB slot: exactly ONE real cabinet from the CAB section, and it must be the natural match for the chosen amp (e.g. Brit 800 → Brit LD 4x12, B-Man N → B-Man 2x10, Supero 2 CL → Supero 2x12). Stacking multiple AMP blocks, duplicating "Dr. 38 Clean" / any amp, or inserting loops is strictly prohibited.
+6. DRIVE slot: may ONLY hold a real overdrive/distortion/fuzz pedal from the DRV section (e.g. Bass OD, Tube 808, Skreamer 9, Fuzz Cream, Master Dist). Never put an AMP, CAB, MOD, or EQ algorithm in the DRIVE slot. If the prompt is for a clean tone, still pick a real DRV pedal and set its gain low.
+7. MOD slot: modulation only. Map "Flanger" and "Phaser" (and variants like Flanger N, Phaser ST, BBD Phaser) to this slot — they are MOD algorithms, never DRIVE or AMP. Same for chorus, tremolo, vibrato, vibe, detune.
+8. Choose creatively per prompt: match amp + cab + drive + modulation to the genre, decade, and reference artist the user names. Vary between generations; do not default to one "standard" preset.
+9. Master Volume (VOLUME slot) is computed dynamically from the gain structure: high-gain amps + heavy drive → 55–75; mid-gain crunch → 72–85; clean/boutique low-gain → 85–100. Never hardcode 90.
 
-ESCOLHA DE ALGORITMOS — SEJA CRIATIVO E FIEL À DESCRIÇÃO:
-- Analise RIGOROSAMENTE a descrição do usuário. Cada palavra importa: gênero, intensidade, referências de artista, década, clima. NUNCA use um algoritmo padrão por preguiça — escolha o que melhor representa o pedido.
-- VARIE os blocos a cada geração. Não repita sempre a mesma cadeia. Dois prompts parecidos podem gerar timbres diferentes se o contexto mudar.
-- AMP: escolha o amplificador condizente com o estilo:
-  * Metal pesado / djent / hardcore → amps high-gain (ex.: Bog SV OD, Dragon, Euro Blue, Uber)
-  * Hard rock / clássico → amps de ganho médio-alto (ex.: Brit 800, Plexi, J45)
-  * Blues / vintage → amps vintage low-watt (ex.: B-Man, TWD Deluxe, Dark Deluxe)
-  * Pop / funk / limpo → amps clean (ex.: Supero CL, Voks CL, TWD Lux)
-  * Fusion / crunch → amps de break-up (ex.: Voks 30, B-Man, Dark Deluxe)
-- CAB: escolha a caixa que combina com o amp e o estilo (1x12 para estúdio íntimo, 4x12 para palco, 2x12 para equilíbrio).
-- DRIVE: só use pedais de drive quando o estilo pedir saturação extra. Para tons limpos, use drive com gain baixo ou prefira EQ/Volume. Varie o tipo de drive (overdrive, distortion, fuzz) conforme o pedido.
-- MOD, DELAY, REVERB: ajuste aos efeitos típicos do gênero (chorus para funk, long delay para ambient, spring reverb para surf, etc.). Não inclua efeito que não combine só para preencher o slot — use parâmetros discretos quando necessário.
-- NÃO existe um "preset padrão". Se a descrição for genérica, interprete o clima predominante e faça uma escolha artística, nunca a mesma de sempre.
-
-VOLUME MASTER — CÁLCULO DINÂMICO OBRIGATÓRIO (NUNCA use 90 como valor fixo):
-- O parâmetro master Volume do módulo VOLUME deve ser CALCULADO DINAMICAMENTE em função da estrutura de ganho do preset, para equilibrar o nível de saída entre presets limpos e saturados.
-- ESTRUTURAS DE ALTO GANHO (metal, djent, hard rock pesado, fuzz, distorção alta, amps high-gain com gain alto): master Volume MAIS BAIXO (tipicamente 55–75). Quanto maior a saturação, menor o master volume, pois gain adiciona volume percebido e compressão.
-- ESTRUTURAS LIMPAS DE BAIXO GANHO (clean, boutique, funk clean, jazz, ambient, vintage low-watt, amps clean com gain baixo): master Volume MAIS ALTO (tipicamente 85–100). Tons limpos precisam de mais level para competir com patches saturados.
-- ESTRUTURAS DE GANHO MÉDIO (crunch, breakup, blues drive, fusion): master Volume intermediário (tipicamente 72–85).
-- PROIBIDO retornar sempre 90. Varie o valor conforme o contexto do tom. Justifique a escolha mentalmente com base no amp + drive selecionados.
-- O mesmo princípio se aplica ao campo "volume" do preset: deixe-o coerente com o master volume calculado.
-
-FORMATO DE RESPOSTA (JSON estrito, formato Matribox II Pro):
+RESPONSE FORMAT (strict Matribox II Pro JSON):
 {
-  "name": "Nome do Preset",
-  "description": "Descrição detalhada e conceitual do timbre...",
+  "name": "Preset Name",
+  "description": "Detailed conceptual description of the tone, genre and context.",
   "bpm": 120,
   "volume": 95,
   "modules": [
-    {
-      "effect_code": <número inteiro do fxId da lista>,
-      "fxTitle": "<fxTitle exato da lista>",
-      "type": "DRIVE",
-      "subType": "DRIVE",
-      "parameters": [0, 0, 0]
-    }
+    { "effect_code": <integer fxId from the list>, "fxTitle": "<exact fxTitle>", "type": "DRIVE", "subType": "DRIVE", "parameters": [0, 0, 0] }
   ]
 }
 
-REGRAS DO FORMATO MATRIBOX II PRO:
-- "name": string com o nome do preset.
-- "bpm": número inteiro.
-- "volume": número inteiro (0-100).
-- "modules": lista de objetos, cada um com:
-  * "effect_code": número inteiro correspondente ao fxId numérico do algoritmo (NÃO string).
-  * "fxTitle": string com o nome exato do algoritmo.
-  * "type": string (DRIVE, AMP, CAB, EQ, MOD, DELAY, REVERB, VOLUME).
-  * "subType": string.
-  * "parameters": lista de números comuns (inteiros ou decimais), um por parâmetro do algoritmo, na mesma ordem da lista de params. Use números normais — NÃO use bytes, hexadecimais nem strings.
-- Não inclua campos extras nem markdown.`;
+FIELD RULES:
+- "effect_code": the integer fxId of the chosen algorithm (a number, never a string, never hex).
+- "fxTitle": the exact fxTitle string from the list.
+- "type": one of DRIVE, AMP, CAB, EQ, MOD, DELAY, REVERB, VOLUME.
+- "parameters": a flat array of plain numbers (integers or decimals), one per algorithm parameter, in the same order as the list. No bytes, no hex, no strings.
+- No extra fields, no markdown.`;
 }
 
 function clampParam(value: number, min: number, max: number): number {
@@ -117,24 +93,85 @@ type MatriboxPreset = {
   modules?: MatriboxModule[];
 };
 
-function reconcilePreset(
-  raw: MatriboxPreset,
-  algorithms: Algorithm[],
-  basePreset?: BasePreset | null,
-): GeneratedPreset {
-  const modules = (raw.modules || []).map((mod) => {
+// Remap loose modulation names the model sometimes emits (Flanger, Phaser,
+// Chorus, Tremolo, Vibe, Detune) into the canonical MOD slot type so the blue
+// MOD block icon lights up in the signal chain.
+function canonicalizeType(raw: string | undefined): Slot | string {
+  const t = (raw || '').toUpperCase().trim();
+  if (t === 'CHORUS' || t === 'FLANGER' || t === 'PHASER' ||
+      t === 'TREMOLO' || t === 'VIBRATO' || t === 'VIBE' ||
+      t === 'DETUNE' || t === 'ROTARY' || t.includes('PHASE') ||
+      t.includes('FLANGE') || t.includes('CHORU')) {
+    return 'MOD';
+  }
+  if (t === 'VOLUME' || t === 'VOL' || t === 'VOLUME_PEDAL') return 'VOLUME';
+  if (t === 'DELAY' || t === 'DLY') return 'DELAY';
+  if (t === 'REVERB' || t === 'RVB') return 'REVERB';
+  if (t === 'DRIVE' || t === 'DRV' || t === 'OD' || t === 'DIST') return 'DRIVE';
+  if (t === 'AMP' || t === 'AMPLIFIER') return 'AMP';
+  if (t === 'CAB' || t === 'CABINET') return 'CAB';
+  if (t === 'EQ' || t === 'EQUALIZER') return 'EQ';
+  return t;
+}
+
+function reconcilePreset(raw: MatriboxPreset, algorithms: Algorithm[]): GeneratedPreset {
+  const byId = new Map(algorithms.map((a) => [a.fxId, a]));
+  const byTitle = new Map(algorithms.map((a) => [a.fxTitle.toLowerCase(), a]));
+
+  const incoming = (raw.modules || []).map((mod) => {
     const fxId = mod.effect_code !== undefined ? String(mod.effect_code) : mod.fxId || '';
-    const alg = findAlgorithm(algorithms, fxId, mod.type, mod.fxTitle);
+    const alg =
+      (fxId && byId.get(fxId)) ||
+      (mod.fxTitle && byTitle.get(mod.fxTitle.toLowerCase()));
+    const type = canonicalizeType(alg?.type || mod.type);
+    return { mod, fxId, alg, type };
+  });
+
+  // Enforce the fixed slot order. For each slot, take the first incoming
+  // module whose canonicalized type matches, then filter that one out so it
+  // cannot be reused. This guarantees exactly one AMP, one CAB, one DRIVE,
+  // etc. — stacking and duplication collapse into the single canonical slot.
+  const used = new Set<number>();
+  const ordered: PresetModule[] = [];
+
+  for (const slot of SLOT_ORDER) {
+    const hitIdx = incoming.findIndex((m, i) => !used.has(i) && m.type === slot);
+    if (hitIdx === -1) {
+      // Slot missing — leave a placeholder that the caller can still render.
+      ordered.push({
+        fxId: '',
+        fxTitle: `${slot} (vazio)`,
+        type: slot,
+        subType: slot,
+        params: [],
+      });
+      continue;
+    }
+    used.add(hitIdx);
+    const { mod, fxId, alg } = incoming[hitIdx];
+
+    // DRIVE slot must hold a real DRV pedal. If the model placed something
+    // else there, pick the first real DRV pedal as a safe fallback so the red
+    // DRIVE block never renders a non-drive algorithm.
+    let resolvedAlg = alg;
+    if (slot === 'DRIVE') {
+      if (!alg || !DRV_PEDALS.has(alg.fxTitle)) {
+        resolvedAlg = algorithms.find((a) => DRV_PEDALS.has(a.fxTitle)) ?? alg;
+      }
+    }
+
     const flatParams = Array.isArray(mod.parameters)
       ? mod.parameters.map((v) => Number(v))
       : null;
-    const validParams = (alg?.params || []).map((algParam, idx) => {
+    const validParams = (resolvedAlg?.params || []).map((algParam, idx) => {
       let value: number;
       if (flatParams && idx < flatParams.length) {
         value = clampParam(flatParams[idx], algParam.min, algParam.max);
       } else {
-        const incoming = mod.params?.find((p) => p.name === algParam.name);
-        value = incoming ? clampParam(Number(incoming.value), algParam.min, algParam.max) : algParam.value;
+        const incomingParam = mod.params?.find((p) => p.name === algParam.name);
+        value = incomingParam
+          ? clampParam(Number(incomingParam.value), algParam.min, algParam.max)
+          : algParam.value;
       }
       return {
         name: algParam.name,
@@ -145,13 +182,11 @@ function reconcilePreset(
         unit: algParam.unit,
       };
     });
+
     let params: PresetModuleParam[];
     if (validParams.length > 0) {
       params = validParams;
     } else if (flatParams) {
-      // No matching algorithm found, but the AI returned numeric parameter
-      // values — render them as generic 0-100 sliders so the chain is never
-      // left visually empty.
       params = flatParams.map((v, i) => ({
         name: `param_${i}`,
         displayName: `Param ${i + 1}`,
@@ -160,31 +195,20 @@ function reconcilePreset(
         max: 100,
       }));
     } else {
-      params = (mod.params || []).map((p) => ({ name: p.name, value: Number(p.value), min: 0, max: 100 }));
+      params = (mod.params || []).map((p) => ({
+        name: p.name,
+        value: Number(p.value),
+        min: 0,
+        max: 100,
+      }));
     }
 
-    return {
-      fxId: alg?.fxId || fxId,
-      fxTitle: alg?.fxTitle || mod.fxTitle || '',
-      type: alg?.type || mod.type || 'unknown',
-      subType: alg?.subType || mod.subType || '',
+    ordered.push({
+      fxId: resolvedAlg?.fxId || fxId,
+      fxTitle: resolvedAlg?.fxTitle || mod.fxTitle || '',
+      type: slot,
+      subType: slot,
       params,
-    };
-  });
-
-  // Force the selected base tone's amp + cab fxIds so the rendered chain
-  // preserves the exact amp+cab algorithm the user picked, regardless of what
-  // the AI returned for those slots.
-  let finalModules = modules;
-  if (basePreset) {
-    finalModules = modules.map((mod, i) => {
-      if (i === 1) {
-        return patchModule(mod, basePreset.ampFxId, basePreset.ampName, algorithms);
-      }
-      if (i === 2) {
-        return patchModule(mod, basePreset.cabFxId, basePreset.cabName, algorithms);
-      }
-      return mod;
     });
   }
 
@@ -193,55 +217,25 @@ function reconcilePreset(
     description: raw.description || '',
     bpm: raw.bpm || 120,
     volume: raw.volume ?? 95,
-    modules: finalModules,
+    modules: ordered,
   };
-}
-
-function patchModule(
-  mod: PresetModule,
-  fxId: string,
-  fxTitle: string,
-  algorithms: Algorithm[],
-): PresetModule {
-  const alg = findAlgorithm(algorithms, fxId);
-  if (alg) {
-    const validParams = alg.params.map((algParam) => {
-      const incoming = mod.params?.find((p) => p.name === algParam.name);
-      const value = incoming ? clampParam(Number(incoming.value), algParam.min, algParam.max) : algParam.value;
-      return {
-        name: algParam.name,
-        displayName: algParam.displayName,
-        value,
-        min: algParam.min,
-        max: algParam.max,
-        unit: algParam.unit,
-      };
-    });
-    return {
-      fxId: alg.fxId,
-      fxTitle: alg.fxTitle,
-      type: alg.type,
-      subType: alg.subType || '',
-      params: validParams,
-    };
-  }
-  return { ...mod, fxId, fxTitle };
 }
 
 export async function generatePreset(
   userPrompt: string,
   algorithms: Algorithm[],
-  basePreset?: BasePreset | null,
 ): Promise<GeneratedPreset> {
   const apiKey = getEffectiveApiKey();
   if (!apiKey) {
-    throw new Error('Chave do Gemini não configurada. Abra Settings e adicione sua chave da API Gemini, ou defina VITE_GEMINI_API_KEY no .env.');
+    throw new Error(
+      'Chave do Gemini não configurada. Abra Settings e adicione sua chave da API Gemini, ou defina VITE_GEMINI_API_KEY no .env.',
+    );
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
     model: MODEL_NAME,
-    systemInstruction: buildSystemPrompt(algorithms, basePreset),
+    systemInstruction: buildSystemPrompt(algorithms),
     generationConfig: {
       temperature: 0.7,
       responseMimeType: 'application/json',
@@ -254,7 +248,9 @@ export async function generatePreset(
   } catch (e) {
     const err = e as { status?: number; message?: string };
     if (err?.status === 429 || err?.message?.includes('429')) {
-      throw new Error('Limite de requisições atingido (Rate Limit 429). Aguarde alguns segundos e tente novamente.');
+      throw new Error(
+        'Limite de requisições atingido (Rate Limit 429). Aguarde alguns segundos e tente novamente.',
+      );
     }
     throw new Error(`Erro na API Gemini: ${err?.message || String(e)}`);
   }
@@ -272,5 +268,5 @@ export async function generatePreset(
     }
   }
 
-  return reconcilePreset(parsed, algorithms, basePreset);
+  return reconcilePreset(parsed, algorithms);
 }

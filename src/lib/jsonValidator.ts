@@ -86,16 +86,15 @@ function normalizeAlgorithm(raw: RawAlgorithm): Algorithm | null {
 }
 
 /**
- * Heuristic: does this object look like an algorithm/effect node?
- * It must have an identifying key (fxId/id/effectId) OR a title key
- * (fxTitle/name/title/label), AND ideally a params/widget array.
- * Pure container/group objects (no identifying keys) are skipped.
+ * Collect leaf algorithm entries only. A node is a leaf when it carries a
+ * concrete identifier (fxId / id / effectId) — the numeric key the device
+ * uses to address an algorithm. Group/module wrappers (the JSON's top-level
+ * "Modules" entries: DYN, DRV, AMP, …) carry only a `name` and an `alg`
+ * array, never a fxId, so they must NOT be counted as algorithms
+ * themselves — otherwise the wrapper + its children double-count every
+ * module (the historical "283" bug: 16 wrappers + 267 real entries).
  */
-function looksLikeAlgorithm(obj: Record<string, unknown>): boolean {
-  // Widget/param entries live inside an algorithm's `widget` array. They
-  // describe a single parameter (Sustain, Volume, …) and must NOT be treated
-  // as standalone algorithms — doing so pollutes the list with empty-param
-  // fakes that shadow the real effects.
+function isLeafAlgorithm(obj: Record<string, unknown>): boolean {
   if (
     'widgetType' in obj ||
     'valueRange' in obj ||
@@ -104,22 +103,9 @@ function looksLikeAlgorithm(obj: Record<string, unknown>): boolean {
   ) {
     return false;
   }
-  const hasId =
-    'fxId' in obj || 'id' in obj || 'effectId' in obj;
-  const hasTitle =
-    'fxTitle' in obj || 'name' in obj || 'title' in obj || 'label' in obj;
-  const hasParams =
-    'params' in obj || 'parameters' in obj || 'controls' in obj || 'widget' in obj;
-  return (hasId || hasTitle) && (hasParams || hasId || hasTitle);
+  return 'fxId' in obj || 'id' in obj || 'effectId' in obj;
 }
 
-/**
- * Deep flatten: recursively walks the entire JSON tree and collects
- * EVERY object that looks like an algorithm into a single linear list.
- * Unlike the old approach (which stopped at the first array found),
- * this continues into nested objects and arrays at any depth, so
- * effects hidden inside category/group wrappers are all gathered.
- */
 function deepCollectAlgorithms(raw: unknown, depth: number, out: RawAlgorithm[]): void {
   if (depth > 12) return;
 
@@ -133,11 +119,15 @@ function deepCollectAlgorithms(raw: unknown, depth: number, out: RawAlgorithm[])
   if (raw && typeof raw === 'object') {
     const obj = raw as Record<string, unknown>;
 
-    if (looksLikeAlgorithm(obj)) {
+    if (isLeafAlgorithm(obj)) {
       out.push(obj as RawAlgorithm);
+      // A leaf algorithm carries its own params/widget; do not recurse into
+      // it — its children are parameter widgets, not algorithms.
+      return;
     }
 
-    // Always recurse into children so we catch nested effects inside groups
+    // Not a leaf: recurse into children so we reach the real entries nested
+    // inside group/module wrappers.
     for (const val of Object.values(obj)) {
       if (val && typeof val === 'object') {
         deepCollectAlgorithms(val, depth + 1, out);

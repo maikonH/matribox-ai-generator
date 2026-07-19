@@ -1,15 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import Header from './components/Header';
 import SettingsDrawer from './components/SettingsDrawer';
 import PromptBar from './components/PromptBar';
 import PresetCard from './components/PresetCard';
-import BasePresetSelector from './components/BasePresetSelector';
 import ToastContainer from './components/ToastContainer';
 import { useToasts } from './hooks/useToasts';
 import { loadAlgorithmsAsync } from './lib/algorithmStore';
+import { ALGORITHM_COUNT } from './lib/algorithmCatalog';
 import { generatePreset } from './lib/gemini';
-import { basePresets, getBasePreset } from './lib/basePresets';
-import { getBaseAlgorithms } from './lib/baseAlgorithms';
 import type { Algorithm, GeneratedPreset } from './lib/types';
 
 export default function App() {
@@ -18,35 +16,28 @@ export default function App() {
   const [prompt, setPrompt] = useState('');
   const [preset, setPreset] = useState<GeneratedPreset | null>(null);
   const [loading, setLoading] = useState(false);
-  const [selectedBaseId, setSelectedBaseId] = useState<string | null>(null);
   const { toasts, showToast, dismiss } = useToasts();
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const loaded = await loadAlgorithmsAsync();
-      if (cancelled) return;
-      // Merge base amp/cab algorithms so the AI always knows about the
-      // base tones even if the user uploaded a partial alg_data.json.
-      const baseAlgs = getBaseAlgorithms();
-      const existing = new Set(loaded.map((a) => a.fxId));
-      const merged = [...loaded, ...baseAlgs.filter((a) => !existing.has(a.fxId))];
-      setAlgorithms(merged);
-    })();
-    return () => { cancelled = true; };
+  // The header counter is locked to the static 267-entry catalog and is
+  // immune to localStorage / IndexedDB resets. `algorithms` is only used to
+  // power the Settings drawer's memory browser; generation always falls back
+  // to the catalog when it is empty.
+  const loadOnce = useCallback(async () => {
+    const loaded = await loadAlgorithmsAsync();
+    setAlgorithms(loaded);
   }, []);
+
+  const ensureLoaded = useCallback(async () => {
+    if (algorithms.length === 0) await loadOnce();
+    return algorithms.length > 0 ? algorithms : (await loadAlgorithmsAsync());
+  }, [algorithms, loadOnce]);
 
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim() || loading) return;
-    const base = getBasePreset(selectedBaseId ?? '') ?? null;
-    const merged = algorithms.length > 0 ? algorithms : getBaseAlgorithms();
-    if (merged.length === 0) {
-      showToast('Nenhum algoritmo carregado. Abra Settings e faça upload do JSON.', 'error');
-      return;
-    }
+    const merged = await ensureLoaded();
     setLoading(true);
     try {
-      const result = await generatePreset(prompt.trim(), merged, base);
+      const result = await generatePreset(prompt.trim(), merged);
       setPreset(result);
       showToast(`Preset "${result.title}" gerado com sucesso!`, 'success');
     } catch (e) {
@@ -54,22 +45,16 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [prompt, loading, algorithms, selectedBaseId, showToast]);
+  }, [prompt, loading, ensureLoaded, showToast]);
 
   const handleQuickPrompt = useCallback(
     (quick: string) => {
       setPrompt(quick);
       setLoading(true);
-      const base = getBasePreset(selectedBaseId ?? '') ?? null;
-      const merged = algorithms.length > 0 ? algorithms : getBaseAlgorithms();
       const run = async () => {
-        if (merged.length === 0) {
-          showToast('Nenhum algoritmo carregado. Abra Settings e faça upload do JSON.', 'error');
-          setLoading(false);
-          return;
-        }
+        const merged = await ensureLoaded();
         try {
-          const result = await generatePreset(quick, merged, base);
+          const result = await generatePreset(quick, merged);
           setPreset(result);
           showToast(`Preset "${result.title}" gerado com sucesso!`, 'success');
         } catch (e) {
@@ -80,7 +65,7 @@ export default function App() {
       };
       run();
     },
-    [algorithms, selectedBaseId, showToast],
+    [ensureLoaded, showToast],
   );
 
   const handleParamChange = useCallback(
@@ -102,7 +87,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-bg-900 text-slate-200">
-      <Header algCount={algorithms.length} onOpenSettings={() => setSettingsOpen(true)} />
+      <Header algCount={ALGORITHM_COUNT} onOpenSettings={() => setSettingsOpen(true)} />
 
       <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         <div className="space-y-3">
@@ -114,12 +99,6 @@ export default function App() {
               Descreva o som e a IA monta a cadeia de sinal completa
             </p>
           </div>
-          <BasePresetSelector
-            basePresets={basePresets}
-            selectedId={selectedBaseId}
-            onSelect={setSelectedBaseId}
-            disabled={loading}
-          />
           <PromptBar
             value={prompt}
             onChange={setPrompt}

@@ -1,34 +1,26 @@
 import type { Algorithm, AlgorithmCategory } from './types';
-import { mockAlgorithms } from '../data/mockAlgorithms';
+import { ALGORITHM_CATALOG, getCatalog } from './algorithmCatalog';
 import { dbGetAlgorithms, dbSetAlgorithms, dbClearAlgorithms } from './algorithmDb';
 
-const STORAGE_KEY = 'matribox_algorithms';
+// The 267-entry catalog is the permanent baseline. A user-uploaded
+// alg_data.json (via Settings) may override it in IndexedDB, but the catalog
+// is always the fallback and is the set the AI draws from by default.
 
 /**
- * Load algorithms from IndexedDB. Falls back to localStorage (legacy migration)
- * and finally to mockAlgorithms on first boot. Migrates any localStorage data
- * into IndexedDB and removes the legacy entry.
+ * Load the effective algorithm set.
+ *
+ * Resolution order:
+ *   1. A user-uploaded alg_data.json previously persisted to IndexedDB.
+ *   2. The locked 267-entry catalog compiled from src/data/alg_data.json.
+ *
+ * The catalog fallback is computed at module load and is immune to any
+ * localStorage / IndexedDB reset — the header counter therefore cannot
+ * drop below 267 unless the user explicitly uploads a smaller JSON.
  */
 export async function loadAlgorithmsAsync(): Promise<Algorithm[]> {
   const fromDb = await dbGetAlgorithms<Algorithm[]>();
   if (fromDb && Array.isArray(fromDb) && fromDb.length > 0) return fromDb;
-
-  try {
-    const legacy = localStorage.getItem(STORAGE_KEY);
-    if (legacy) {
-      const parsed = JSON.parse(legacy);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        await dbSetAlgorithms(parsed);
-        localStorage.removeItem(STORAGE_KEY);
-        return parsed;
-      }
-    }
-  } catch {
-    // ignore malformed legacy data
-  }
-
-  await dbSetAlgorithms(mockAlgorithms);
-  return mockAlgorithms;
+  return getCatalog();
 }
 
 export async function saveAlgorithmsAsync(algorithms: Algorithm[]): Promise<void> {
@@ -37,12 +29,10 @@ export async function saveAlgorithmsAsync(algorithms: Algorithm[]): Promise<void
 
 export async function clearAlgorithmsAsync(): Promise<void> {
   await dbClearAlgorithms();
-  localStorage.removeItem(STORAGE_KEY);
 }
 
-/** @deprecated Use loadAlgorithmsAsync. Kept for backward compatibility. */
-export function loadAlgorithms(): Algorithm[] {
-  return mockAlgorithms;
+export function getCatalogAlgorithms(): Algorithm[] {
+  return ALGORITHM_CATALOG;
 }
 
 export function getCategorized(algorithms: Algorithm[]): AlgorithmCategory[] {
