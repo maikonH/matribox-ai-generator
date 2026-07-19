@@ -67,6 +67,15 @@ function resolveModuleIcon(module: PresetModule): string | undefined {
 
 export default function SignalBlock({ module, index, onParamChange }: Props) {
   const [expanded, setExpanded] = useState(index === 0);
+
+  if (!module || !module.fxId) {
+    return (
+      <div className="bg-surface border border-dashed border-border rounded-xl px-4 py-3 text-xs text-slate-500">
+        Slot vazio
+      </div>
+    );
+  }
+
   const moduleIcon = resolveModuleIcon(module);
 
   return (

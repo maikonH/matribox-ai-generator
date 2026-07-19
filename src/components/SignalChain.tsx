@@ -17,14 +17,26 @@ export default function SignalChain({ modules, onParamChange }: Props) {
       </div>
 
       <div className="space-y-2">
-        {modules.map((mod, idx) => (
-          <SignalBlock
-            key={`${mod.fxId}-${idx}`}
-            module={mod}
-            index={idx}
-            onParamChange={(paramIndex, value) => onParamChange(idx, paramIndex, value)}
-          />
-        ))}
+        {modules.map((mod, idx) => {
+          if (!mod || !mod.fxId) {
+            return (
+              <div
+                key={`empty-${idx}`}
+                className="bg-surface border border-dashed border-border rounded-xl px-4 py-3 text-xs text-slate-500"
+              >
+                Slot {idx + 1} vazio
+              </div>
+            );
+          }
+          return (
+            <SignalBlock
+              key={`${mod.fxId}-${idx}`}
+              module={mod}
+              index={idx}
+              onParamChange={(paramIndex, value) => onParamChange(idx, paramIndex, value)}
+            />
+          );
+        })}
       </div>
     </div>
   );
