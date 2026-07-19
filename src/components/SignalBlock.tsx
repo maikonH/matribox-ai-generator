@@ -54,6 +54,14 @@ function resolveModuleIcon(module: PresetModule): string | undefined {
   if (direct) return direct;
   const hay = `${module.type} ${module.fxTitle}`.toUpperCase().trim();
   if (hay.includes('VOLUME') || hay.includes('VOL')) return imgVol;
+  if (
+    hay.includes('MOD') ||
+    hay.includes('CHORUS') ||
+    hay.includes('FLANGER') ||
+    hay.includes('PHASER')
+  ) {
+    return imgMod;
+  }
   return moduleImageMap[key];
 }
 
