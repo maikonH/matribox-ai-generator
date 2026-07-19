@@ -101,7 +101,7 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen bg-[#030712] text-slate-200">
+    <div className="min-h-screen bg-bg-900 text-slate-200">
       <Header algCount={algorithms.length} onOpenSettings={() => setSettingsOpen(true)} />
 
       <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">

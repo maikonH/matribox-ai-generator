@@ -23,12 +23,31 @@
   }
 }
 
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
+  background: #22c55e;
+  box-shadow: 0 0 8px -1px rgba(34, 197, 94, 0.5);
 }
 
 input[type='range']::-moz-range-thumb {
   border: none;
-  background: transparent;
+  background: #22c55e;
+  box-shadow: 0 0 8px -1px rgba(34, 197, 94, 0.5);
 }
