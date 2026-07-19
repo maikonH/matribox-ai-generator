@@ -33,10 +33,10 @@ export default function SignalBlock({ module, index, onParamChange }: Props) {
   const colorClass = typeColors[module.type] || 'text-slate-400 bg-slate-400/10 border-slate-400/30';
 
   return (
-    <div className="bg-[#0b0f19] border border-slate-800/80 rounded-xl overflow-hidden transition-all">
+    <div className="bg-surface border border-border rounded-xl overflow-hidden transition-all">
       <button
         onClick={() => setExpanded((prev) => !prev)}
-        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-900/40 transition-colors text-left"
+        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-surface-light/50 transition-colors text-left"
       >
         <span className="text-slate-600 font-mono text-xs tabular-nums w-6 text-right shrink-0">
           {String(index + 1).padStart(2, '0')}
@@ -57,7 +57,7 @@ export default function SignalBlock({ module, index, onParamChange }: Props) {
           expanded ? 'max-h-[600px]' : 'max-h-0'
         }`}
       >
-        <div className="px-4 pb-4 pt-2 space-y-3 border-t border-slate-800/40">
+        <div className="px-4 pb-4 pt-2 space-y-3 border-t border-border">
           {module.params.map((param, pIdx) =>
             isToggleParam(param) ? (
               <ToggleSwitch
