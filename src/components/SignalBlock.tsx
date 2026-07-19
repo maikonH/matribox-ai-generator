@@ -2,7 +2,37 @@ import { useState } from 'react';
 import type { PresetModule, PresetModuleParam } from '../lib/types';
 import PremiumSlider from './PremiumSlider';
 import ToggleSwitch from './ToggleSwitch';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Layers } from 'lucide-react';
+import imgDrv from '../assets/module_btn_drv.png';
+import imgAmp from '../assets/module_btn_amp.png';
+import imgCab from '../assets/module_btn_cab.png';
+import imgEq from '../assets/module_btn_eq.png';
+import imgMod from '../assets/module_btn_mod.png';
+import imgDly from '../assets/module_btn_dly.png';
+import imgRvb from '../assets/module_btn_rvb.png';
+import imgVol from '../assets/module_btn_vol.png';
+import imgWah from '../assets/module_btn_wah.png';
+import imgDyn from '../assets/module_btn_dyn.png';
+import imgFreq from '../assets/module_btn_freq.png';
+
+const moduleImageMap: Record<string, string> = {
+  DRIVE: imgDrv,
+  OD: imgDrv,
+  AMP: imgAmp,
+  CAB: imgCab,
+  EQ: imgEq,
+  MOD: imgMod,
+  CHORUS: imgMod,
+  DELAY: imgDly,
+  REVERB: imgRvb,
+  VOLUME: imgVol,
+  VOL: imgVol,
+  WAH: imgWah,
+  DYN: imgDyn,
+  COMP: imgDyn,
+  GATE: imgDyn,
+  FREQ: imgFreq,
+};
 
 const TOGGLE_NAMES = new Set(['sync', 'trail', 'switch']);
 
@@ -17,20 +47,9 @@ interface Props {
   onParamChange: (paramIndex: number, value: number) => void;
 }
 
-const typeColors: Record<string, string> = {
-  COMP: 'text-amber-400 bg-amber-400/10 border-amber-400/30',
-  DRIVE: 'text-orange-400 bg-orange-400/10 border-orange-400/30',
-  AMP: 'text-red-400 bg-red-400/10 border-red-400/30',
-  CAB: 'text-yellow-400 bg-yellow-400/10 border-yellow-400/30',
-  EQ: 'text-green-400 bg-green-400/10 border-green-400/30',
-  DELAY: 'text-cyan-400 bg-cyan-400/10 border-cyan-400/30',
-  REVERB: 'text-sky-400 bg-sky-400/10 border-sky-400/30',
-  MOD: 'text-fuchsia-400 bg-fuchsia-400/10 border-fuchsia-400/30',
-};
-
 export default function SignalBlock({ module, index, onParamChange }: Props) {
   const [expanded, setExpanded] = useState(index === 0);
-  const colorClass = typeColors[module.type] || 'text-slate-400 bg-slate-400/10 border-slate-400/30';
+  const moduleIcon = moduleImageMap[module.type.toUpperCase()];
 
   return (
     <div className="bg-surface border border-border rounded-xl overflow-hidden transition-all">
@@ -38,12 +57,17 @@ export default function SignalBlock({ module, index, onParamChange }: Props) {
         onClick={() => setExpanded((prev) => !prev)}
         className="w-full flex items-center gap-3 px-4 py-3 hover:bg-surface-light/50 transition-colors text-left"
       >
-        <span className="text-slate-600 font-mono text-xs tabular-nums w-6 text-right shrink-0">
-          {String(index + 1).padStart(2, '0')}
-        </span>
-        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border shrink-0 ${colorClass}`}>
-          {module.subType || module.type}
-        </span>
+        {moduleIcon ? (
+          <img
+            src={moduleIcon}
+            alt={module.type}
+            className="h-7 w-auto object-contain flex-shrink-0 mr-3"
+          />
+        ) : (
+          <span className="flex items-center justify-center h-7 w-7 rounded-md bg-surface-light border border-border text-slate-500 flex-shrink-0 mr-3">
+            <Layers className="w-4 h-4" />
+          </span>
+        )}
         <span className="text-white text-sm font-medium truncate flex-1">{module.fxTitle}</span>
         {expanded ? (
           <ChevronDown className="w-4 h-4 text-slate-500 shrink-0" />
