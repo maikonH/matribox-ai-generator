@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { Algorithm, GeneratedPreset, PresetModule, PresetModuleParam } from './types';
 import { findAlgorithm } from './algorithmStore';
+import { ALGORITHM_CATALOG } from './algorithmCatalog';
 import { getEffectiveApiKey } from './apiKeyStore';
 
 const MODEL_NAME = 'gemini-3.1-flash-lite';
@@ -200,8 +201,13 @@ function canonicalizeType(raw: string | undefined): Slot | string {
 }
 
 function reconcilePreset(raw: MatriboxPreset, algorithms: Algorithm[]): GeneratedPreset {
-  const byId = new Map(algorithms.map((a) => [a.fxId, a]));
-  const byTitle = new Map(algorithms.map((a) => [a.fxTitle.toLowerCase(), a]));
+  // Merge the static 267-entry catalog as a guaranteed fallback so the
+  // mandatory AMP/CAB/VOLUME finds never return undefined, even when the
+  // caller passes an empty or partial algorithms array (e.g. IndexedDB miss).
+  const merged = algorithms.length > 0 ? algorithms : ALGORITHM_CATALOG;
+  const catalog = [...merged, ...ALGORITHM_CATALOG.filter((c) => !merged.some((m) => m.fxId === c.fxId))];
+  const byId = new Map(catalog.map((a) => [a.fxId, a]));
+  const byTitle = new Map(catalog.map((a) => [a.fxTitle.toLowerCase(), a]));
 
   const incoming = (raw.modules || []).map((mod) => {
     const fxId = mod.effect_code !== undefined ? String(mod.effect_code) : mod.fxId || '';
@@ -227,7 +233,7 @@ function reconcilePreset(raw: MatriboxPreset, algorithms: Algorithm[]): Generate
     // real amp, its matched cabinet, and the factory volume pedal.
     if (hitIdx === -1) {
       if (slot === 'AMP') {
-        const fallbackAmp = algorithms.find((a) => a.type === 'AMP')!;
+        const fallbackAmp = catalog.find((a) => a.type === 'AMP')!;
         ordered.push({
           fxId: fallbackAmp.fxId,
           fxTitle: fallbackAmp.fxTitle,
@@ -244,7 +250,7 @@ function reconcilePreset(raw: MatriboxPreset, algorithms: Algorithm[]): Generate
         const chosenAmp = ordered.find((m) => m.type === 'AMP');
         const pairedCabTitle = chosenAmp ? AMP_CAB_PAIRINGS[chosenAmp.fxTitle] : undefined;
         const cabAlg = (pairedCabTitle && byTitle.get(pairedCabTitle.toLowerCase()))
-          || algorithms.find((a) => a.type === 'CAB')!;
+          || catalog.find((a) => a.type === 'CAB')!;
         ordered.push({
           fxId: cabAlg.fxId,
           fxTitle: cabAlg.fxTitle,
@@ -258,7 +264,7 @@ function reconcilePreset(raw: MatriboxPreset, algorithms: Algorithm[]): Generate
         continue;
       }
       if (slot === 'VOLUME') {
-        const volAlg = algorithms.find((a) => a.type === 'VOL' || a.fxTitle === 'Volume')!;
+        const volAlg = catalog.find((a) => a.type === 'VOL' || a.fxTitle === 'Volume')!;
         const chosenAmp = ordered.find((m) => m.type === 'AMP');
         const chosenDrive = ordered.find((m) => m.type === 'DRIVE');
         const level = inferVolumeLevel(chosenAmp?.fxTitle || '', chosenDrive?.fxTitle);
@@ -295,13 +301,13 @@ function reconcilePreset(raw: MatriboxPreset, algorithms: Algorithm[]): Generate
     let resolvedAlg = alg;
     if (slot === 'DRIVE') {
       if (!alg || !DRV_PEDALS.has(alg.fxTitle)) {
-        resolvedAlg = algorithms.find((a) => DRV_PEDALS.has(a.fxTitle)) ?? alg;
+        resolvedAlg = catalog.find((a) => DRV_PEDALS.has(a.fxTitle)) ?? alg;
       }
     }
     // AMP slot must hold a real amplifier from the catalog.
     if (slot === 'AMP') {
       if (!alg || alg.type !== 'AMP') {
-        resolvedAlg = algorithms.find((a) => a.type === 'AMP') ?? alg;
+        resolvedAlg = catalog.find((a) => a.type === 'AMP') ?? alg;
       }
     }
     // CAB slot must hold a real cabinet; if the model picked one that doesn't
@@ -311,12 +317,12 @@ function reconcilePreset(raw: MatriboxPreset, algorithms: Algorithm[]): Generate
         const chosenAmp = ordered.find((m) => m.type === 'AMP');
         const pairedCabTitle = chosenAmp ? AMP_CAB_PAIRINGS[chosenAmp.fxTitle] : undefined;
         resolvedAlg = (pairedCabTitle && byTitle.get(pairedCabTitle.toLowerCase()))
-          || (algorithms.find((a) => a.type === 'CAB') ?? alg);
+          || (catalog.find((a) => a.type === 'CAB') ?? alg);
       }
     }
     // VOLUME slot must always load the factory volume pedal algorithm.
     if (slot === 'VOLUME') {
-      const volAlg = algorithms.find((a) => a.type === 'VOL' || a.fxTitle === 'Volume');
+      const volAlg = catalog.find((a) => a.type === 'VOL' || a.fxTitle === 'Volume');
       if (volAlg) resolvedAlg = volAlg;
     }
 
