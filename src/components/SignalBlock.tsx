@@ -1,7 +1,15 @@
 import { useState } from 'react';
-import type { PresetModule } from '../lib/types';
+import type { PresetModule, PresetModuleParam } from '../lib/types';
 import PremiumSlider from './PremiumSlider';
+import ToggleSwitch from './ToggleSwitch';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+
+const TOGGLE_NAMES = new Set(['sync', 'trail', 'switch']);
+
+function isToggleParam(param: PresetModuleParam): boolean {
+  if (TOGGLE_NAMES.has(param.name.toLowerCase())) return true;
+  return param.min === 0 && param.max === 1;
+}
 
 interface Props {
   module: PresetModule;
@@ -50,13 +58,21 @@ export default function SignalBlock({ module, index, onParamChange }: Props) {
         }`}
       >
         <div className="px-4 pb-4 pt-2 space-y-3 border-t border-slate-800/40">
-          {module.params.map((param, pIdx) => (
-            <PremiumSlider
-              key={param.name}
-              param={param}
-              onChange={(value) => onParamChange(pIdx, value)}
-            />
-          ))}
+          {module.params.map((param, pIdx) =>
+            isToggleParam(param) ? (
+              <ToggleSwitch
+                key={param.name}
+                param={param}
+                onChange={(value) => onParamChange(pIdx, value)}
+              />
+            ) : (
+              <PremiumSlider
+                key={param.name}
+                param={param}
+                onChange={(value) => onParamChange(pIdx, value)}
+              />
+            ),
+          )}
         </div>
       </div>
     </div>
