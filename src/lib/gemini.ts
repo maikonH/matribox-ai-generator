@@ -55,26 +55,34 @@ ESCOLHA DE ALGORITMOS — SEJA CRIATIVO E FIEL À DESCRIÇÃO:
 - MOD, DELAY, REVERB: ajuste aos efeitos típicos do gênero (chorus para funk, long delay para ambient, spring reverb para surf, etc.). Não inclua efeito que não combine só para preencher o slot — use parâmetros discretos quando necessário.
 - NÃO existe um "preset padrão". Se a descrição for genérica, interprete o clima predominante e faça uma escolha artística, nunca a mesma de sempre.
 
-FORMATO DE RESPOSTA (JSON estrito):
+FORMATO DE RESPOSTA (JSON estrito, formato Matribox II Pro):
 {
-  "title": "Nome do Preset",
+  "name": "Nome do Preset",
   "description": "Descrição detalhada e conceitual do timbre...",
   "bpm": 120,
   "volume": 95,
   "modules": [
     {
-      "fxId": "<fxId numérico da lista>",
+      "effect_code": <número inteiro do fxId da lista>,
       "fxTitle": "<fxTitle exato da lista>",
       "type": "DRIVE",
       "subType": "DRIVE",
-      "params": [
-        { "name": "<nome do param>", "value": 0 },
-        { "name": "<nome do param>", "value": 0 },
-        { "name": "<nome do param>", "value": 0 }
-      ]
+      "parameters": [0, 0, 0]
     }
   ]
-}`;
+}
+
+REGRAS DO FORMATO MATRIBOX II PRO:
+- "name": string com o nome do preset.
+- "bpm": número inteiro.
+- "volume": número inteiro (0-100).
+- "modules": lista de objetos, cada um com:
+  * "effect_code": número inteiro correspondente ao fxId numérico do algoritmo (NÃO string).
+  * "fxTitle": string com o nome exato do algoritmo.
+  * "type": string (DRIVE, AMP, CAB, EQ, MOD, DELAY, REVERB, VOLUME).
+  * "subType": string.
+  * "parameters": lista de números comuns (inteiros ou decimais), um por parâmetro do algoritmo, na mesma ordem da lista de params. Use números normais — NÃO use bytes, hexadecimais nem strings.
+- Não inclua campos extras nem markdown.`;
 }
 
 function clampParam(value: number, min: number, max: number): number {
@@ -82,16 +90,44 @@ function clampParam(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+type MatriboxModule = {
+  effect_code?: number | string;
+  fxId?: string;
+  fxTitle?: string;
+  type?: string;
+  subType?: string;
+  parameters?: (number | string)[];
+  params?: { name: string; value: number | string }[];
+};
+
+type MatriboxPreset = {
+  name?: string;
+  title?: string;
+  description?: string;
+  bpm?: number;
+  volume?: number;
+  modules?: MatriboxModule[];
+};
+
 function reconcilePreset(
-  raw: GeneratedPreset,
+  raw: MatriboxPreset,
   algorithms: Algorithm[],
   basePreset?: BasePreset | null,
 ): GeneratedPreset {
   const modules = (raw.modules || []).map((mod) => {
-    const alg = findAlgorithm(algorithms, mod.fxId, mod.type);
-    const validParams = (alg?.params || []).map((algParam) => {
-      const incoming = mod.params?.find((p) => p.name === algParam.name);
-      const value = incoming ? clampParam(Number(incoming.value), algParam.min, algParam.max) : algParam.value;
+    const fxId = mod.effect_code !== undefined ? String(mod.effect_code) : mod.fxId || '';
+    const alg = findAlgorithm(algorithms, fxId, mod.type);
+    const flatParams = Array.isArray(mod.parameters)
+      ? mod.parameters.map((v) => Number(v))
+      : null;
+    const validParams = (alg?.params || []).map((algParam, idx) => {
+      let value: number;
+      if (flatParams && idx < flatParams.length) {
+        value = clampParam(flatParams[idx], algParam.min, algParam.max);
+      } else {
+        const incoming = mod.params?.find((p) => p.name === algParam.name);
+        value = incoming ? clampParam(Number(incoming.value), algParam.min, algParam.max) : algParam.value;
+      }
       return {
         name: algParam.name,
         displayName: algParam.displayName,
@@ -102,11 +138,13 @@ function reconcilePreset(
       };
     });
     return {
-      fxId: alg?.fxId || mod.fxId,
-      fxTitle: alg?.fxTitle || mod.fxTitle,
-      type: alg?.type || mod.type,
-      subType: alg?.subType || mod.subType,
-      params: validParams.length > 0 ? validParams : mod.params,
+      fxId: alg?.fxId || fxId,
+      fxTitle: alg?.fxTitle || mod.fxTitle || '',
+      type: alg?.type || mod.type || 'unknown',
+      subType: alg?.subType || mod.subType || '',
+      params: validParams.length > 0
+        ? validParams
+        : (mod.params || []).map((p) => ({ name: p.name, value: Number(p.value), min: 0, max: 100 })),
     };
   });
 
@@ -127,7 +165,7 @@ function reconcilePreset(
   }
 
   return {
-    title: raw.title || 'Preset Sem Nome',
+    title: raw.name || raw.title || 'Preset Sem Nome',
     description: raw.description || '',
     bpm: raw.bpm || 120,
     volume: raw.volume ?? 95,
@@ -198,7 +236,7 @@ export async function generatePreset(
   }
 
   const text = result.response.text();
-  let parsed: GeneratedPreset;
+  let parsed: MatriboxPreset;
   try {
     parsed = JSON.parse(text);
   } catch {
