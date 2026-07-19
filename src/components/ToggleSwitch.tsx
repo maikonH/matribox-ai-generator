@@ -30,6 +30,3 @@ export default function ToggleSwitch({ param, onChange }: Props) {
     </div>
   );
 }
-
-
-export default ToggleSwitch
