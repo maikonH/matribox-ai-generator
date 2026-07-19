@@ -48,9 +48,18 @@ interface Props {
   onParamChange: (paramIndex: number, value: number) => void;
 }
 
+function resolveModuleIcon(module: PresetModule): string | undefined {
+  const key = module.type.toUpperCase().trim();
+  const direct = moduleImageMap[key];
+  if (direct) return direct;
+  const hay = `${module.type} ${module.fxTitle}`.toUpperCase().trim();
+  if (hay.includes('VOLUME') || hay.includes('VOL')) return imgVol;
+  return moduleImageMap[key];
+}
+
 export default function SignalBlock({ module, index, onParamChange }: Props) {
   const [expanded, setExpanded] = useState(index === 0);
-  const moduleIcon = moduleImageMap[module.type.toUpperCase().trim()];
+  const moduleIcon = resolveModuleIcon(module);
 
   return (
     <div className="bg-surface border border-border rounded-xl overflow-hidden transition-all">

@@ -55,6 +55,14 @@ ESCOLHA DE ALGORITMOS — SEJA CRIATIVO E FIEL À DESCRIÇÃO:
 - MOD, DELAY, REVERB: ajuste aos efeitos típicos do gênero (chorus para funk, long delay para ambient, spring reverb para surf, etc.). Não inclua efeito que não combine só para preencher o slot — use parâmetros discretos quando necessário.
 - NÃO existe um "preset padrão". Se a descrição for genérica, interprete o clima predominante e faça uma escolha artística, nunca a mesma de sempre.
 
+VOLUME MASTER — CÁLCULO DINÂMICO OBRIGATÓRIO (NUNCA use 90 como valor fixo):
+- O parâmetro master Volume do módulo VOLUME deve ser CALCULADO DINAMICAMENTE em função da estrutura de ganho do preset, para equilibrar o nível de saída entre presets limpos e saturados.
+- ESTRUTURAS DE ALTO GANHO (metal, djent, hard rock pesado, fuzz, distorção alta, amps high-gain com gain alto): master Volume MAIS BAIXO (tipicamente 55–75). Quanto maior a saturação, menor o master volume, pois gain adiciona volume percebido e compressão.
+- ESTRUTURAS LIMPAS DE BAIXO GANHO (clean, boutique, funk clean, jazz, ambient, vintage low-watt, amps clean com gain baixo): master Volume MAIS ALTO (tipicamente 85–100). Tons limpos precisam de mais level para competir com patches saturados.
+- ESTRUTURAS DE GANHO MÉDIO (crunch, breakup, blues drive, fusion): master Volume intermediário (tipicamente 72–85).
+- PROIBIDO retornar sempre 90. Varie o valor conforme o contexto do tom. Justifique a escolha mentalmente com base no amp + drive selecionados.
+- O mesmo princípio se aplica ao campo "volume" do preset: deixe-o coerente com o master volume calculado.
+
 FORMATO DE RESPOSTA (JSON estrito, formato Matribox II Pro):
 {
   "name": "Nome do Preset",
