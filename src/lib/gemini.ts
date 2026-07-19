@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import type { Algorithm, GeneratedPreset, PresetModule } from './types';
+import type { Algorithm, GeneratedPreset, PresetModule, PresetModuleParam } from './types';
 import { findAlgorithm } from './algorithmStore';
 import { getEffectiveApiKey } from './apiKeyStore';
 import type { BasePreset } from './basePresets';
@@ -116,7 +116,7 @@ function reconcilePreset(
 ): GeneratedPreset {
   const modules = (raw.modules || []).map((mod) => {
     const fxId = mod.effect_code !== undefined ? String(mod.effect_code) : mod.fxId || '';
-    const alg = findAlgorithm(algorithms, fxId, mod.type);
+    const alg = findAlgorithm(algorithms, fxId, mod.type, mod.fxTitle);
     const flatParams = Array.isArray(mod.parameters)
       ? mod.parameters.map((v) => Number(v))
       : null;
@@ -137,18 +137,34 @@ function reconcilePreset(
         unit: algParam.unit,
       };
     });
+    let params: PresetModuleParam[];
+    if (validParams.length > 0) {
+      params = validParams;
+    } else if (flatParams) {
+      // No matching algorithm found, but the AI returned numeric parameter
+      // values — render them as generic 0-100 sliders so the chain is never
+      // left visually empty.
+      params = flatParams.map((v, i) => ({
+        name: `param_${i}`,
+        displayName: `Param ${i + 1}`,
+        value: clampParam(v, 0, 100),
+        min: 0,
+        max: 100,
+      }));
+    } else {
+      params = (mod.params || []).map((p) => ({ name: p.name, value: Number(p.value), min: 0, max: 100 }));
+    }
+
     return {
       fxId: alg?.fxId || fxId,
       fxTitle: alg?.fxTitle || mod.fxTitle || '',
       type: alg?.type || mod.type || 'unknown',
       subType: alg?.subType || mod.subType || '',
-      params: validParams.length > 0
-        ? validParams
-        : (mod.params || []).map((p) => ({ name: p.name, value: Number(p.value), min: 0, max: 100 })),
+      params,
     };
   });
 
-  // Force the selected base tone's amp + cab fxIds so the downloaded .prst
+  // Force the selected base tone's amp + cab fxIds so the rendered chain
   // preserves the exact amp+cab algorithm the user picked, regardless of what
   // the AI returned for those slots.
   let finalModules = modules;

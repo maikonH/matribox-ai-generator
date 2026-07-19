@@ -92,6 +92,18 @@ function normalizeAlgorithm(raw: RawAlgorithm): Algorithm | null {
  * Pure container/group objects (no identifying keys) are skipped.
  */
 function looksLikeAlgorithm(obj: Record<string, unknown>): boolean {
+  // Widget/param entries live inside an algorithm's `widget` array. They
+  // describe a single parameter (Sustain, Volume, …) and must NOT be treated
+  // as standalone algorithms — doing so pollutes the list with empty-param
+  // fakes that shadow the real effects.
+  if (
+    'widgetType' in obj ||
+    'valueRange' in obj ||
+    'codeing' in obj ||
+    'defaultValue' in obj
+  ) {
+    return false;
+  }
   const hasId =
     'fxId' in obj || 'id' in obj || 'effectId' in obj;
   const hasTitle =

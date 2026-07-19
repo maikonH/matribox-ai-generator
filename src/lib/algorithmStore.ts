@@ -74,14 +74,25 @@ export function findAlgorithm(
   algorithms: Algorithm[],
   fxId: string,
   fallbackType?: string,
+  fxTitle?: string,
 ): Algorithm | undefined {
   const byId = algorithms.find((a) => a.fxId === fxId);
   if (byId) return byId;
   if (fallbackType) {
+    const lower = fallbackType.toLowerCase();
     const byType = algorithms.find(
-      (a) => a.type === fallbackType || a.subType === fallbackType,
+      (a) =>
+        a.type.toLowerCase() === lower ||
+        a.subType.toLowerCase() === lower,
     );
     if (byType) return byType;
+  }
+  if (fxTitle) {
+    const lowerTitle = fxTitle.toLowerCase();
+    const byTitle = algorithms.find(
+      (a) => a.fxTitle.toLowerCase() === lowerTitle,
+    );
+    if (byTitle) return byTitle;
   }
   return undefined;
 }
