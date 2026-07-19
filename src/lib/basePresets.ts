@@ -1,7 +1,7 @@
 // Dynamic base tone presets. The full amp + cab catalog is read from
 // alg_data.json so every algorithm the device knows about is available — no
-// manual curation required. The AI picks the amp + cab fxIds and the binary
-// .prst is assembled dynamically by presetDownload.ts (no fixed template).
+// manual curation required. The AI picks the amp + cab fxIds and the preset
+// is rendered directly on screen (no binary download).
 
 import algData from '../data/alg_data.json';
 

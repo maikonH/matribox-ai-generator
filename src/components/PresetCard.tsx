@@ -1,15 +1,14 @@
 import type { GeneratedPreset } from '../lib/types';
 import SignalChain from './SignalChain';
-import { Download, Music2, Volume2, Layers, Loader2 } from 'lucide-react';
+import { Music2, Volume2, Layers, Loader2 } from 'lucide-react';
 
 interface Props {
   preset: GeneratedPreset | null;
   loading: boolean;
   onParamChange: (moduleIndex: number, paramIndex: number, value: number) => void;
-  onDownload: () => void;
 }
 
-export default function PresetCard({ preset, loading, onParamChange, onDownload }: Props) {
+export default function PresetCard({ preset, loading, onParamChange }: Props) {
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -42,7 +41,7 @@ export default function PresetCard({ preset, loading, onParamChange, onDownload 
   return (
     <div className="space-y-6">
       <div className="bg-[#0b0f19] border border-slate-800/80 rounded-2xl p-5 sm:p-6">
-        <div className="flex items-start justify-between gap-4 mb-4">
+        <div className="flex items-start gap-4 mb-4">
           <div className="min-w-0 flex-1">
             <h2 className="text-white font-bold text-lg sm:text-xl tracking-tight leading-tight">
               {preset.title}
@@ -51,13 +50,6 @@ export default function PresetCard({ preset, loading, onParamChange, onDownload 
               {preset.description}
             </p>
           </div>
-          <button
-            onClick={onDownload}
-            className="shrink-0 px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-400 to-sky-500 text-slate-950 font-bold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-cyan-500/30 transition-all whitespace-nowrap"
-          >
-            <Download className="w-4 h-4" />
-            Baixar .prst
-          </button>
         </div>
 
         <div className="flex flex-wrap gap-3 pt-4 border-t border-slate-800/60">

@@ -8,7 +8,6 @@ import ToastContainer from './components/ToastContainer';
 import { useToasts } from './hooks/useToasts';
 import { loadAlgorithmsAsync } from './lib/algorithmStore';
 import { generatePreset } from './lib/gemini';
-import { downloadPresetPro } from './lib/presetDownload';
 import { basePresets, getBasePreset } from './lib/basePresets';
 import { getBaseAlgorithms } from './lib/baseAlgorithms';
 import type { Algorithm, GeneratedPreset } from './lib/types';
@@ -101,20 +100,6 @@ export default function App() {
     [],
   );
 
-  const handleDownload = useCallback(() => {
-    if (!preset) return;
-
-    const modules = preset.modules
-      .filter((m) => m.enabled !== false)
-      .map((mod) => ({
-        fxId: Number(mod.fxId) || 0,
-        params: mod.params.map((p) => p.value),
-      }));
-
-    downloadPresetPro(preset.title, modules);
-    showToast('Download do preset iniciado.', 'success');
-  }, [preset, showToast]);
-
   return (
     <div className="min-h-screen bg-[#030712] text-slate-200">
       <Header algCount={algorithms.length} onOpenSettings={() => setSettingsOpen(true)} />
@@ -148,7 +133,6 @@ export default function App() {
           preset={preset}
           loading={loading}
           onParamChange={handleParamChange}
-          onDownload={handleDownload}
         />
       </main>
 
