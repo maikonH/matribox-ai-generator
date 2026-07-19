@@ -8,7 +8,7 @@ import ToastContainer from './components/ToastContainer';
 import { useToasts } from './hooks/useToasts';
 import { loadAlgorithmsAsync } from './lib/algorithmStore';
 import { generatePreset } from './lib/gemini';
-import { downloadPreset } from './lib/presetDownload';
+import { downloadPresetPro } from './lib/presetDownload';
 import { basePresets, getBasePreset } from './lib/basePresets';
 import { getBaseAlgorithms } from './lib/baseAlgorithms';
 import type { Algorithm, GeneratedPreset } from './lib/types';
@@ -102,10 +102,23 @@ export default function App() {
   );
 
   const handleDownload = useCallback(() => {
-    if (preset) {
-      downloadPreset(preset);
-      showToast('Download do preset iniciado.', 'success');
-    }
+    if (!preset) return;
+
+    const findModule = (type: string) =>
+      preset.modules.find((m) => m.type === type);
+
+    const ampModule = findModule('AMP');
+    const cabModule = findModule('CAB');
+
+    const ampFxId = ampModule ? Number(ampModule.fxId) : 0;
+    const cabFxId = cabModule ? Number(cabModule.fxId) : 0;
+
+    const params = preset.modules.flatMap((mod) =>
+      mod.enabled === false ? [] : mod.params.map((p) => p.value),
+    );
+
+    downloadPresetPro(preset.title, ampFxId, cabFxId, params);
+    showToast('Download do preset iniciado.', 'success');
   }, [preset, showToast]);
 
   return (
