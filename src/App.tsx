@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import Header from './components/Header';
 import SettingsDrawer from './components/SettingsDrawer';
 import PromptBar from './components/PromptBar';
@@ -7,7 +7,8 @@ import ToastContainer from './components/ToastContainer';
 import { useToasts } from './hooks/useToasts';
 import { loadAlgorithmsAsync } from './lib/algorithmStore';
 import { ALGORITHM_COUNT } from './lib/algorithmCatalog';
-import { generatePreset } from './lib/gemini';
+import { generatePreset, aiResponseToPreset } from './lib/gemini';
+import { buildPresetFile, downloadPresetFile, type AiPresetResponse, type BuiltPreset } from './lib/presetBuilder';
 import type { Algorithm, GeneratedPreset } from './lib/types';
 
 export default function App() {
@@ -15,13 +16,11 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [preset, setPreset] = useState<GeneratedPreset | null>(null);
+  const aiResponseRef = useRef<AiPresetResponse | null>(null);
+  const [builtPreset, setBuiltPreset] = useState<BuiltPreset | null>(null);
   const [loading, setLoading] = useState(false);
   const { toasts, showToast, dismiss } = useToasts();
 
-  // The header counter is locked to the static 267-entry catalog and is
-  // immune to localStorage / IndexedDB resets. `algorithms` is only used to
-  // power the Settings drawer's memory browser; generation always falls back
-  // to the catalog when it is empty.
   const loadOnce = useCallback(async () => {
     const loaded = await loadAlgorithmsAsync();
     setAlgorithms(loaded);
@@ -32,40 +31,40 @@ export default function App() {
     return algorithms.length > 0 ? algorithms : (await loadAlgorithmsAsync());
   }, [algorithms, loadOnce]);
 
+  const runGeneration = useCallback(
+    async (promptText: string, merged: Algorithm[]) => {
+      setLoading(true);
+      try {
+        const ai = await generatePreset(promptText, merged);
+        aiResponseRef.current = ai;
+        setBuiltPreset(buildPresetFile(ai));
+        setPreset(aiResponseToPreset(ai));
+        showToast(`Preset "${ai.nomePatch}" gerado com sucesso!`, 'success');
+      } catch (e) {
+        showToast((e as Error).message, 'error');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [showToast],
+  );
+
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim() || loading) return;
     const merged = await ensureLoaded();
-    setLoading(true);
-    try {
-      const result = await generatePreset(prompt.trim(), merged);
-      setPreset(result);
-      showToast(`Preset "${result.title}" gerado com sucesso!`, 'success');
-    } catch (e) {
-      showToast((e as Error).message, 'error');
-    } finally {
-      setLoading(false);
-    }
-  }, [prompt, loading, ensureLoaded, showToast]);
+    await runGeneration(prompt.trim(), merged);
+  }, [prompt, loading, ensureLoaded, runGeneration]);
 
   const handleQuickPrompt = useCallback(
     (quick: string) => {
       setPrompt(quick);
-      setLoading(true);
       const run = async () => {
         const merged = await ensureLoaded();
-        try {
-          const result = await generatePreset(quick, merged);
-          setPreset(result);
-          showToast(`Preset "${result.title}" gerado com sucesso!`, 'success');
-        } catch (e) {
-          showToast((e as Error).message, 'error');
-        } finally {
-          setLoading(false);
-        }
+        await runGeneration(quick, merged);
       };
       run();
     },
-    [ensureLoaded, showToast],
+    [ensureLoaded, runGeneration],
   );
 
   const handleParamChange = useCallback(
@@ -81,9 +80,30 @@ export default function App() {
         });
         return { ...prev, modules };
       });
+      // Keep the built preset file in sync with knob edits so the download
+      // always reflects the current slider state.
+      const prevAi = aiResponseRef.current;
+      if (prevAi) {
+        const cadeia = prevAi.cadeia.map((entry, i) => {
+          if (i !== moduleIndex) return entry;
+          const knobs = entry.knobs.map((k, kIdx) =>
+            kIdx === paramIndex ? Math.round(value) : k,
+          );
+          return { ...entry, knobs };
+        });
+        const updated = { ...prevAi, cadeia };
+        aiResponseRef.current = updated;
+        setBuiltPreset(buildPresetFile(updated));
+      }
     },
     [],
   );
+
+  const handleDownload = useCallback(() => {
+    if (!builtPreset) return;
+    downloadPresetFile(builtPreset);
+    showToast(`Arquivo ${builtPreset.nomePatch}.prst baixado!`, 'success');
+  }, [builtPreset, showToast]);
 
   return (
     <div className="min-h-screen bg-bg-900 text-slate-200">
@@ -112,6 +132,8 @@ export default function App() {
           preset={preset}
           loading={loading}
           onParamChange={handleParamChange}
+          onDownload={handleDownload}
+          canDownload={!!builtPreset}
         />
       </main>
 

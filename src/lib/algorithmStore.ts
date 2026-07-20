@@ -73,7 +73,7 @@ export function findAlgorithm(
     const byType = algorithms.find(
       (a) =>
         a.type.toLowerCase() === lower ||
-        a.subType.toLowerCase() === lower,
+        (a.subType ?? '').toLowerCase() === lower,
     );
     if (byType) return byType;
   }

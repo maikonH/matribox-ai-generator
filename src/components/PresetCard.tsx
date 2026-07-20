@@ -1,14 +1,16 @@
 import type { GeneratedPreset } from '../lib/types';
 import SignalChain from './SignalChain';
-import { Music2, Volume2, Layers, Loader2 } from 'lucide-react';
+import { Music2, Volume2, Layers, Loader2, Download } from 'lucide-react';
 
 interface Props {
   preset: GeneratedPreset | null;
   loading: boolean;
   onParamChange: (moduleIndex: number, paramIndex: number, value: number) => void;
+  onDownload: () => void;
+  canDownload: boolean;
 }
 
-export default function PresetCard({ preset, loading, onParamChange }: Props) {
+export default function PresetCard({ preset, loading, onParamChange, onDownload, canDownload }: Props) {
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -70,6 +72,14 @@ export default function PresetCard({ preset, loading, onParamChange }: Props) {
               {preset.modules.length}
             </span>
           </div>
+          <button
+            onClick={onDownload}
+            disabled={!canDownload}
+            className="ml-auto flex items-center gap-2 px-4 py-1.5 rounded-lg bg-gradient-to-r from-cyan-400 to-sky-500 text-bg-900 font-bold text-xs disabled:opacity-40 disabled:cursor-not-allowed hover:shadow-lg hover:shadow-cyan-500/20 transition-all"
+          >
+            <Download className="w-4 h-4" />
+            Baixar .prst
+          </button>
         </div>
       </div>
 
