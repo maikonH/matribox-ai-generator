@@ -23,11 +23,17 @@ type AlgModule = { name: string; alg: AlgEntry[] };
 
 const MODULES: AlgModule[] = (algData as { Modules: AlgModule[] }).Modules;
 
-// fxTitle → fxid lookup, built once from the local catalog.
+// fxTitle → fxid and name → fxid lookups, built once from the local catalog.
+// The AI is prompted with fxTitles, but historically it sometimes returns the
+// internal `name` field (e.g. "Skreamer" instead of the fxTitle "Green Drive").
+// Resolving against both keeps every active effect from being silently
+// dropped — which was the root cause of the 76-byte truncated preset bug.
 const FX_TITLE_TO_ID = new Map<string, number>();
+const FX_NAME_TO_ID = new Map<string, number>();
 for (const mod of MODULES) {
   for (const alg of mod.alg) {
-    FX_TITLE_TO_ID.set(alg.fxtitle.toLowerCase(), alg.fxid);
+    FX_TITLE_TO_ID.set((alg.fxtitle || '').toLowerCase(), alg.fxid);
+    if (alg.name) FX_NAME_TO_ID.set(alg.name.toLowerCase(), alg.fxid);
   }
 }
 
@@ -96,11 +102,17 @@ function bytesToBase64(bytes: number[]): string {
 }
 
 /**
- * Resolve the fxid for a given effect name. Returns undefined when the name
- * is not present in alg_data.json — the caller decides how to handle it.
+ * Resolve the fxid for a given effect name. The AI is instructed to return the
+ * fxTitle, but it sometimes returns the internal `name` instead, so we look up
+ * both. Returns undefined only when neither matches — the caller decides how
+ * to handle it.
  */
 export function resolveFxId(nomeEfeito: string): number | undefined {
-  return FX_TITLE_TO_ID.get((nomeEfeito || '').toLowerCase());
+  const key = (nomeEfeito || '').toLowerCase().trim();
+  if (!key) return undefined;
+  const byTitle = FX_TITLE_TO_ID.get(key);
+  if (byTitle !== undefined) return byTitle;
+  return FX_NAME_TO_ID.get(key);
 }
 
 /**
@@ -123,15 +135,42 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
   bytes.push(...PRO_SIGNATURE);
 
   // Bloco 3 — cadeia de sinal ativa.
+  // Diagnóstico: registra cada entrada da cadeia e se o fxid foi resolvido,
+  // para que presets truncados (apenas cabeçalho + rodapé) sejam fáceis de
+  // rastrear no console do navegador.
+  // eslint-disable-next-line no-console
+  console.groupCollapsed(
+    `[presetBuilder] buildPresetFile: ${ai.cadeia?.length ?? 0} módulos na cadeia`,
+  );
+  let resolvedCount = 0;
+  let skippedCount = 0;
   for (const entry of ai.cadeia || []) {
     const fxid = resolveFxId(entry.nomeEfeito);
-    if (fxid === undefined) continue; // efeito desconhecido: não ocupa espaço
+    if (fxid === undefined) {
+      skippedCount++;
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[presetBuilder] SKIP: "${entry.nomeEfeito}" (${entry.modulo}) — fxid não encontrado no alg_data.json`,
+      );
+      continue; // efeito desconhecido: não ocupa espaço
+    }
+    resolvedCount++;
+    // eslint-disable-next-line no-console
+    console.log(
+      `[presetBuilder] OK: "${entry.nomeEfeito}" (${entry.modulo}) → fxid=${fxid} (0x${fxid.toString(16)}) knobs=[${(entry.knobs || []).join(', ')}]`,
+    );
     bytes.push(1); // status ON
     bytes.push(...fxidToBytes(fxid));
     for (const knob of entry.knobs || []) {
       bytes.push(clampByte(knob));
     }
   }
+  // eslint-disable-next-line no-console
+  console.log(
+    `[presetBuilder] Resumo: ${resolvedCount} módulos inseridos, ${skippedCount} ignorados, ${bytes.length} bytes antes do rodapé`,
+  );
+  // eslint-disable-next-line no-console
+  console.groupEnd();
 
   // Bloco 4 — rodapé fixo de encerramento.
   bytes.push(...FOOTER_BYTES);
