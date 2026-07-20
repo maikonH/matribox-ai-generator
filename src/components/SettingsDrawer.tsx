@@ -1,15 +1,29 @@
 import { useState, useRef, useCallback } from 'react';
 import type { Algorithm } from '../lib/types';
 import { validateAlgData } from '../lib/jsonValidator';
-import { saveAlgorithmsAsync, clearAlgorithmsAsync, getCategorized } from '../lib/algorithmStore';
+import { getCategorized, isOverlayActive } from '../lib/algorithmStore';
+import { ALGORITHM_COUNT } from '../lib/algorithmCatalog';
 import { loadApiKey, saveApiKey, hasEnvApiKey } from '../lib/apiKeyStore';
-import { X, UploadCloud, FileJson, Check, AlertTriangle, Database, Trash2, Key, Eye, EyeOff } from 'lucide-react';
+import {
+  X,
+  UploadCloud,
+  FileJson,
+  Check,
+  AlertTriangle,
+  Database,
+  Trash2,
+  Key,
+  Eye,
+  EyeOff,
+  Wrench,
+  Info,
+} from 'lucide-react';
 
 interface Props {
   open: boolean;
   onClose: () => void;
   algorithms: Algorithm[];
-  onAlgorithmsChanged: (algs: Algorithm[]) => void;
+  onApplyDevOverlay: (algs: Algorithm[] | null) => void;
   onToast: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
@@ -17,36 +31,35 @@ export default function SettingsDrawer({
   open,
   onClose,
   algorithms,
-  onAlgorithmsChanged,
+  onApplyDevOverlay,
   onToast,
 }: Props) {
   const [dragOver, setDragOver] = useState(false);
   const [previewCount, setPreviewCount] = useState<number | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [devOpen, setDevOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [apiKey, setApiKey] = useState(() => loadApiKey());
   const [showKey, setShowKey] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
 
   const categories = getCategorized(algorithms);
+  const overlayActive = isOverlayActive();
 
   const handleFile = useCallback(
     (file: File) => {
       const reader = new FileReader();
-      reader.onload = async (e) => {
+      reader.onload = (e) => {
         const text = e.target?.result as string;
         const result = validateAlgData(text);
         if (result.success) {
-          try {
-            await saveAlgorithmsAsync(result.algorithms);
-            onAlgorithmsChanged(result.algorithms);
-            setPreviewCount(result.count);
-            setPreviewError(null);
-            onToast(`${result.count} algoritmos carregados e salvos no IndexedDB!`, 'success');
-          } catch {
-            setPreviewError('Falha ao salvar no IndexedDB.');
-            onToast('Falha ao salvar no IndexedDB.', 'error');
-          }
+          onApplyDevOverlay(result.algorithms);
+          setPreviewCount(result.count);
+          setPreviewError(null);
+          onToast(
+            `Overlay de desenvolvimento ativo: ${result.count} algoritmos carregados em memória.`,
+            'info',
+          );
         } else {
           setPreviewError(result.error || 'Erro ao processar arquivo.');
           setPreviewCount(null);
@@ -59,7 +72,7 @@ export default function SettingsDrawer({
       };
       reader.readAsText(file);
     },
-    [onAlgorithmsChanged, onToast],
+    [onApplyDevOverlay, onToast],
   );
 
   const handleDrop = useCallback(
@@ -76,12 +89,11 @@ export default function SettingsDrawer({
     [handleFile, onToast],
   );
 
-  const handleReset = async () => {
-    await clearAlgorithmsAsync();
-    onAlgorithmsChanged([]);
+  const handleResetOverlay = () => {
+    onApplyDevOverlay(null);
     setPreviewCount(null);
     setPreviewError(null);
-    onToast('Algoritmos limpos da memória.', 'info');
+    onToast('Overlay de desenvolvimento removido. Catálogo oficial restaurado.', 'info');
   };
 
   return (
@@ -122,7 +134,10 @@ export default function SettingsDrawer({
                   <input
                     type={showKey ? 'text' : 'password'}
                     value={apiKey}
-                    onChange={(e) => { setApiKey(e.target.value); setKeySaved(false); }}
+                    onChange={(e) => {
+                      setApiKey(e.target.value);
+                      setKeySaved(false);
+                    }}
                     placeholder="AIza..."
                     className="w-full h-10 rounded-xl bg-[#0b0f19] border border-slate-800/80 pl-9 pr-10 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/60 focus:ring-2 focus:ring-cyan-500/10 transition-all font-mono"
                   />
@@ -135,7 +150,11 @@ export default function SettingsDrawer({
                   </button>
                 </div>
                 <button
-                  onClick={() => { saveApiKey(apiKey.trim()); setKeySaved(true); onToast('Chave salva com sucesso!', 'success'); }}
+                  onClick={() => {
+                    saveApiKey(apiKey.trim());
+                    setKeySaved(true);
+                    onToast('Chave salva com sucesso!', 'success');
+                  }}
                   disabled={!apiKey.trim()}
                   className="h-10 px-4 rounded-xl bg-gradient-to-r from-cyan-400 to-sky-500 text-slate-950 font-bold text-xs disabled:opacity-40 disabled:cursor-not-allowed transition-all hover:shadow-lg hover:shadow-cyan-500/20 shrink-0"
                 >
@@ -155,65 +174,55 @@ export default function SettingsDrawer({
                 </div>
               )}
               <p className="text-slate-600 text-xs">
-                A chave do navegador tem prioridade; sem ela, a chave do .env é usada automaticamente. Nunca é enviada a terceiros.
+                A chave do navegador tem prioridade; sem ela, a chave do .env é
+                usada automaticamente. Nunca é enviada a terceiros.
               </p>
             </div>
           </section>
 
           <section>
             <h3 className="text-slate-300 text-xs font-semibold uppercase tracking-wider mb-3">
-              Upload do alg_data.json
+              Catálogo Oficial
             </h3>
-            <div
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragOver(true);
-              }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
-              className={`relative rounded-2xl border-2 border-dashed cursor-pointer transition-all duration-200 p-8 text-center ${
-                dragOver
-                  ? 'border-cyan-400 bg-cyan-400/5 scale-[1.01]'
-                  : 'border-slate-700 bg-[#0b0f19] hover:border-cyan-500/40'
-              }`}
-            >
-              <UploadCloud
-                className={`w-10 h-10 mx-auto mb-3 transition-colors ${
-                  dragOver ? 'text-cyan-400' : 'text-slate-500'
-                }`}
-              />
-              <p className="text-slate-300 text-sm font-medium">
-                Arraste o arquivo ou clique para selecionar
-              </p>
-              <p className="text-slate-500 text-xs mt-1">
-                Formato: .json — compatível com Sonicake (fxTitle/name, fxId string/number)
-              </p>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".json,application/json"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) handleFile(file);
-                  e.target.value = '';
-                }}
-              />
-            </div>
+            <div className="rounded-xl border border-slate-800/60 bg-[#0b0f19] p-4 space-y-3">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-lg bg-cyan-400/10 border border-cyan-400/20 flex items-center justify-center shrink-0">
+                  <FileJson className="w-4 h-4 text-cyan-400" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-slate-200 text-sm font-semibold">Fonte</p>
+                  <p className="text-slate-400 text-xs font-mono break-all">
+                    src/data/alg_data.json
+                  </p>
+                </div>
+              </div>
 
-            {previewCount !== null && (
-              <div className="mt-3 flex items-center gap-2 text-sm text-cyan-300 bg-cyan-400/10 border border-cyan-400/30 rounded-lg px-3 py-2">
-                <Check className="w-4 h-4" />
-                {previewCount} algoritmos processados
+              <div className="flex items-center justify-between pt-2 border-t border-slate-800/40">
+                <span className="text-slate-400 text-xs">Algoritmos carregados</span>
+                <span className="text-cyan-300 text-sm font-bold tabular-nums">
+                  {ALGORITHM_COUNT}
+                </span>
               </div>
-            )}
-            {previewError && (
-              <div className="mt-3 flex items-start gap-2 text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
-                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-                {previewError}
+
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400 text-xs">Última carga</span>
+                <span className="text-slate-300 text-xs font-medium">Automática</span>
               </div>
-            )}
+
+              {overlayActive && (
+                <div className="flex items-start gap-2 text-xs text-amber-300 bg-amber-400/10 border border-amber-400/30 rounded-lg px-3 py-2 mt-1">
+                  <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  Overlay de desenvolvimento ativo — substitui temporariamente o
+                  catálogo oficial em memória. Recarregar a página restaura o
+                  catálogo oficial.
+                </div>
+              )}
+            </div>
+            <p className="text-slate-600 text-xs mt-2">
+              Para atualizar o catálogo oficial, substitua{' '}
+              <span className="font-mono text-slate-500">src/data/alg_data.json</span>{' '}
+              e recompile a aplicação.
+            </p>
           </section>
 
           <section>
@@ -221,7 +230,9 @@ export default function SettingsDrawer({
               <h3 className="text-slate-300 text-xs font-semibold uppercase tracking-wider">
                 Algoritmos na Memória
               </h3>
-              <span className="text-cyan-300 text-xs font-bold tabular-nums">{algorithms.length}</span>
+              <span className="text-cyan-300 text-xs font-bold tabular-nums">
+                {algorithms.length}
+              </span>
             </div>
 
             {algorithms.length === 0 ? (
@@ -232,7 +243,10 @@ export default function SettingsDrawer({
             ) : (
               <div className="space-y-4">
                 {categories.map((cat) => (
-                  <div key={cat.type} className="bg-[#0d1527] rounded-xl border border-slate-800/60 overflow-hidden">
+                  <div
+                    key={cat.type}
+                    className="bg-[#0d1527] rounded-xl border border-slate-800/60 overflow-hidden"
+                  >
                     <div className="px-3 py-2 bg-slate-900/40 border-b border-slate-800/40">
                       <span className="text-xs font-semibold text-slate-300">
                         {cat.displayName}
@@ -243,9 +257,16 @@ export default function SettingsDrawer({
                     </div>
                     <div className="divide-y divide-slate-800/40">
                       {cat.algorithms.map((alg) => (
-                        <div key={alg.fxId} className="px-3 py-2 flex items-center justify-between gap-2">
-                          <span className="text-xs text-slate-400 truncate">{alg.fxTitle}</span>
-                          <span className="text-[10px] font-mono text-slate-600 shrink-0">{alg.fxId}</span>
+                        <div
+                          key={alg.fxId}
+                          className="px-3 py-2 flex items-center justify-between gap-2"
+                        >
+                          <span className="text-xs text-slate-400 truncate">
+                            {alg.fxTitle}
+                          </span>
+                          <span className="text-[10px] font-mono text-slate-600 shrink-0">
+                            {alg.fxId}
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -253,15 +274,89 @@ export default function SettingsDrawer({
                 ))}
               </div>
             )}
+          </section>
 
-            {algorithms.length > 0 && (
-              <button
-                onClick={handleReset}
-                className="mt-4 w-full flex items-center justify-center gap-2 text-sm text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 rounded-lg py-2 transition-colors"
-              >
-                <Trash2 className="w-4 h-4" />
-                Limpar memória
-              </button>
+          <section>
+            <button
+              onClick={() => setDevOpen((v) => !v)}
+              className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl border border-slate-800/60 bg-[#0b0f19] hover:border-slate-700 transition-colors"
+            >
+              <span className="flex items-center gap-2 text-slate-300 text-xs font-semibold uppercase tracking-wider">
+                <Wrench className="w-4 h-4 text-amber-400" />
+                Ferramentas do Desenvolvedor
+              </span>
+              <span className="text-slate-500 text-xs">{devOpen ? '−' : '+'}</span>
+            </button>
+
+            {devOpen && (
+              <div className="mt-3 space-y-3">
+                <div className="flex items-start gap-2 text-xs text-amber-300 bg-amber-400/10 border border-amber-400/30 rounded-lg px-3 py-2">
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  Substitui temporariamente o catálogo oficial para testes. Não
+                  persiste após recarregar a página.
+                </div>
+
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragOver(true);
+                  }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`relative rounded-2xl border-2 border-dashed cursor-pointer transition-all duration-200 p-6 text-center ${
+                    dragOver
+                      ? 'border-amber-400 bg-amber-400/5 scale-[1.01]'
+                      : 'border-slate-700 bg-[#0b0f19] hover:border-amber-500/40'
+                  }`}
+                >
+                  <UploadCloud
+                    className={`w-8 h-8 mx-auto mb-2 transition-colors ${
+                      dragOver ? 'text-amber-400' : 'text-slate-500'
+                    }`}
+                  />
+                  <p className="text-slate-300 text-xs font-medium">
+                    Arraste um alg_data.json ou clique
+                  </p>
+                  <p className="text-slate-500 text-[11px] mt-1">
+                    Apenas para depuração — não substitui o catálogo oficial
+                  </p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".json,application/json"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleFile(file);
+                      e.target.value = '';
+                    }}
+                  />
+                </div>
+
+                {previewCount !== null && (
+                  <div className="flex items-center gap-2 text-sm text-amber-300 bg-amber-400/10 border border-amber-400/30 rounded-lg px-3 py-2">
+                    <Check className="w-4 h-4" />
+                    {previewCount} algoritmos em overlay temporário
+                  </div>
+                )}
+                {previewError && (
+                  <div className="flex items-start gap-2 text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+                    <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                    {previewError}
+                  </div>
+                )}
+
+                {overlayActive && (
+                  <button
+                    onClick={handleResetOverlay}
+                    className="w-full flex items-center justify-center gap-2 text-sm text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 rounded-lg py-2 transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Remover overlay de desenvolvimento
+                  </button>
+                )}
+              </div>
             )}
           </section>
         </div>

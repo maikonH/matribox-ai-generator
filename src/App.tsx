@@ -5,14 +5,14 @@ import PromptBar from './components/PromptBar';
 import PresetCard from './components/PresetCard';
 import ToastContainer from './components/ToastContainer';
 import { useToasts } from './hooks/useToasts';
-import { loadAlgorithmsAsync } from './lib/algorithmStore';
+import { loadAlgorithms, setDevOverlay } from './lib/algorithmStore';
 import { ALGORITHM_COUNT } from './lib/algorithmCatalog';
 import { generatePreset, aiResponseToPreset } from './lib/gemini';
 import { buildPresetFile, downloadPresetFile, type AiPresetResponse, type BuiltPreset } from './lib/presetBuilder';
 import type { Algorithm, GeneratedPreset } from './lib/types';
 
 export default function App() {
-  const [algorithms, setAlgorithms] = useState<Algorithm[]>([]);
+  const [algorithms, setAlgorithms] = useState<Algorithm[]>(() => loadAlgorithms());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [preset, setPreset] = useState<GeneratedPreset | null>(null);
@@ -21,51 +21,33 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const { toasts, showToast, dismiss } = useToasts();
 
-  const loadOnce = useCallback(async () => {
-    const loaded = await loadAlgorithmsAsync();
-    setAlgorithms(loaded);
-    return loaded;
-  }, []);
-
-  const ensureLoaded = useCallback(async () => {
-    if (algorithms.length > 0) return algorithms;
-    return loadOnce();
-  }, [algorithms, loadOnce]);
-
   const runGeneration = useCallback(
-    async (promptText: string, merged: Algorithm[]) => {
+    (promptText: string, merged: Algorithm[]) => {
       setLoading(true);
-      try {
-        const ai = await generatePreset(promptText, merged);
-        aiResponseRef.current = ai;
-        setBuiltPreset(buildPresetFile(ai));
-        setPreset(aiResponseToPreset(ai));
-        showToast(`Preset "${ai.nomePatch}" gerado com sucesso!`, 'success');
-      } catch (e) {
-        showToast((e as Error).message, 'error');
-      } finally {
-        setLoading(false);
-      }
+      generatePreset(promptText, merged)
+        .then((ai) => {
+          aiResponseRef.current = ai;
+          setBuiltPreset(buildPresetFile(ai));
+          setPreset(aiResponseToPreset(ai));
+          showToast(`Preset "${ai.nomePatch}" gerado com sucesso!`, 'success');
+        })
+        .catch((e: Error) => showToast(e.message, 'error'))
+        .finally(() => setLoading(false));
     },
     [showToast],
   );
 
-  const handleGenerate = useCallback(async () => {
+  const handleGenerate = useCallback(() => {
     if (!prompt.trim() || loading) return;
-    const merged = await ensureLoaded();
-    await runGeneration(prompt.trim(), merged);
-  }, [prompt, loading, ensureLoaded, runGeneration]);
+    runGeneration(prompt.trim(), algorithms);
+  }, [prompt, loading, algorithms, runGeneration]);
 
   const handleQuickPrompt = useCallback(
     (quick: string) => {
       setPrompt(quick);
-      const run = async () => {
-        const merged = await ensureLoaded();
-        await runGeneration(quick, merged);
-      };
-      run();
+      runGeneration(quick, algorithms);
     },
-    [ensureLoaded, runGeneration],
+    [algorithms, runGeneration],
   );
 
   const handleParamChange = useCallback(
@@ -143,7 +125,10 @@ export default function App() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         algorithms={algorithms}
-        onAlgorithmsChanged={setAlgorithms}
+        onApplyDevOverlay={(algs) => {
+          setDevOverlay(algs);
+          setAlgorithms(loadAlgorithms());
+        }}
         onToast={showToast}
       />
 
