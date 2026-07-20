@@ -5,7 +5,10 @@ import { getEffectiveApiKey } from './apiKeyStore';
 import type { AiPresetResponse, ChainEntry } from './presetBuilder';
 import { findSlotForCode } from './hardwareSlots';
 
-const MODEL_NAME = 'gemini-2.5-flash';
+const MODEL_NAME = 'gemini-3.1-flash-lite';
+const API_VERSION = 'v1';
+const SDK_NAME = '@google/generative-ai';
+const SDK_VERSION = '0.24.1';
 
 // The catalog sent to the Gemini model is projected dynamically from
 // src/data/alg_data.json (via ALGORITHM_CATALOG — the single projection of the
@@ -229,17 +232,35 @@ export async function generatePreset(
   const slim = slimFromAlgorithms(catalog);
 
   const genAI = new GoogleGenerativeAI(apiKey);
+  // Force the stable v1 endpoint. @google/generative-ai v0.24.1 defaults to
+  // v1beta, which returns 404 for gemini-3.1-flash-lite; overriding apiVersion
+  // here routes every call to /v1/models/<model>:generateContent.
+  const requestOptions = { apiVersion: API_VERSION };
   const model = genAI.getGenerativeModel({
     model: MODEL_NAME,
     systemInstruction: { role: 'system', parts: [{ text: SYSTEM_PROMPT(slim) }] },
     generationConfig: { temperature: 0.7, responseMimeType: 'application/json' },
-  });
+  }, requestOptions);
+
+  console.log('===== GEMINI CLIENT INIT =====');
+  console.log(`SDK: ${SDK_NAME}@${SDK_VERSION}`);
+  console.log(`Modelo: ${MODEL_NAME}`);
+  console.log(`API: ${API_VERSION}`);
+  console.log(`Endpoint: https://generativelanguage.googleapis.com/${API_VERSION}/models/${MODEL_NAME}:generateContent`);
 
   let result;
   try {
     result = await model.generateContent(userPrompt);
   } catch (e) {
     const err = e as { status?: number; message?: string };
+    if (err?.status === 404 || err?.message?.includes('404') || err?.message?.toLowerCase().includes('not found')) {
+      throw new Error(
+        `Modelo "${MODEL_NAME}" não encontrado na API ${API_VERSION}.\n` +
+        `Endpoint: https://generativelanguage.googleapis.com/${API_VERSION}/models/${MODEL_NAME}:generateContent\n` +
+        `SDK: ${SDK_NAME}@${SDK_VERSION}\n` +
+        `Motivo: o modelo não está disponível nesta versão da API ou a chave não tem acesso a ele.`,
+      );
+    }
     if (err?.status === 429 || err?.message?.includes('429')) {
       throw new Error(
         'Limite de requisições atingido (Rate Limit 429). Aguarde alguns segundos e tente novamente.',
