@@ -25,11 +25,12 @@ export default function App() {
   const loadOnce = useCallback(async () => {
     const loaded = await loadAlgorithmsAsync();
     setAlgorithms(loaded);
+    return loaded;
   }, []);
 
   const ensureLoaded = useCallback(async () => {
-    if (algorithms.length === 0) await loadOnce();
-    return algorithms.length > 0 ? algorithms : (await loadAlgorithmsAsync());
+    if (algorithms.length > 0) return algorithms;
+    return loadOnce();
   }, [algorithms, loadOnce]);
 
   const runGeneration = useCallback(
@@ -81,10 +82,9 @@ export default function App() {
         });
         return { ...prev, modules };
       });
-      // Keep the built preset file in sync with knob edits so the download
-      // always reflects the current slider state. `moduleIndex` is the
-      // hardware slot index (0–9); translate it to the index within the AI's
-      // cadeia array before mutating knobs there.
+      // Keep the preset file in sync with slider edits. moduleIndex is the
+      // hardware slot index (0–9); translate it to the cadeia index before
+      // mutating knobs so the download always matches the UI.
       const prevAi = aiResponseRef.current;
       if (prevAi) {
         const cadeiaIdx = findCadeiaIndexForSlot(prevAi.cadeia || [], moduleIndex);

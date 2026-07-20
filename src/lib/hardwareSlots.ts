@@ -1,20 +1,20 @@
-// The Matribox II Pro (QME-200) exposes a fixed signal chain of exactly 10
-// hardware slots, in this order. Every preset file must contain one block per
-// slot — omitting an inactive slot shifts every following block out of
-// position and the editor rejects the file. The UI mirrors the same order so
-// what the user sees matches what gets written to disk.
+// The Matribox II Pro (QME-200) has a fixed signal chain of exactly 10 hardware
+// slots, in this order. Every preset file contains one block per slot — an
+// inactive slot is a zeroed block, never omitted, or every following block
+// shifts out of position and the editor rejects the file. The UI mirrors the
+// same order so what the user sees matches what gets written to disk.
 
 export interface HardwareSlot {
   // Canonical hardware slot code, used as the on-wire slot identifier.
   code: string;
   // Human-readable label shown in the UI header for the slot.
   displayName: string;
-  // Type string assigned to the resolved PresetModule so the icon resolver
-  // in SignalBlock picks the correct module artwork.
+  // Type assigned to the resolved PresetModule so SignalBlock picks the correct
+  // icon artwork.
   uiType: string;
-  // Every module code that maps to this slot: the canonical code, the codes
-  // the Gemini API may return in `cadeia[].modulo`, and the type labels the
-  // rest of the UI already uses. Matching is case-insensitive.
+  // Every code that maps to this slot: the canonical code, the codes the
+  // Gemini API may return in `cadeia[].modulo`, and the type labels the rest of
+  // the UI already uses. Matching is case-insensitive.
   aliases: string[];
 }
 
@@ -38,15 +38,14 @@ function norm(value: string): string {
 }
 
 // Locate the hardware slot a given module code belongs to. Returns undefined
-// when the code does not map to any slot (e.g. a global EQ the AI emitted but
-// the hardware has no dedicated slot for).
+// when the code does not map to any slot.
 export function findSlotForCode(code: string): HardwareSlot | undefined {
   const c = norm(code);
   return HARDWARE_SLOTS.find((s) => s.aliases.includes(c));
 }
 
 // Find the index within `cadeia` of the entry that belongs to the hardware
-// slot at `slotIndex`. Returns -1 when the AI did not activate that slot.
+// slot at `slotIndex`. Returns -1 when that slot was not activated.
 export function findCadeiaIndexForSlot(
   cadeia: { modulo?: string }[],
   slotIndex: number,

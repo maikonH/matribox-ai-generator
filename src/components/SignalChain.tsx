@@ -8,10 +8,9 @@ interface Props {
 }
 
 export default function SignalChain({ modules, onParamChange }: Props) {
-  // Always render the 10 hardware slots in fixed order. The modules array
-  // is pre-built to match HARDWARE_SLOTS 1:1, but we guard against short
-  // arrays for safety.
-  const activeCount = modules.filter((m) => m && m.enabled && m.fxId).length;
+  // Always render the 10 hardware slots in fixed order. The modules array is
+  // pre-built to match HARDWARE_SLOTS 1:1; the guard handles short arrays.
+  const activeCount = modules.filter((m) => m?.enabled && m.fxId).length;
 
   return (
     <div>
@@ -25,8 +24,7 @@ export default function SignalChain({ modules, onParamChange }: Props) {
       <div className="space-y-2">
         {HARDWARE_SLOTS.map((slot, idx) => {
           const mod = modules[idx];
-          const isActive = !!mod && !!mod.fxId && mod.enabled !== false;
-          if (!isActive) {
+          if (!mod || !mod.fxId || mod.enabled === false) {
             return (
               <div
                 key={`bypass-${slot.code}-${idx}`}
