@@ -37,6 +37,35 @@ for (const mod of MODULES) {
   }
 }
 
+// The Matribox II Pro hardware expects exactly 10 effect slots, in this
+// fixed order, between the patch name and the footer. Each slot must be
+// present in the byte stream — omitting an inactive slot shifts every
+// subsequent block out of position and the editor rejects the file.
+//
+// Each slot is emitted as either:
+//   active:  [1, fxid0, fxid1, fxid2, fxid3, knob0, knob1, ...]
+//   empty:   [0, 0, 0, 0, 0]  (status OFF + zeroed 4-byte fxid, no knobs)
+//
+// `aliases` are the module codes the AI may return in the `modulo` field;
+// the first alias is the canonical hardware slot code.
+const FIXED_SLOTS: { code: string; aliases: string[] }[] = [
+  { code: 'DYN', aliases: ['DYN', 'DYNAMICS'] },
+  { code: 'FREQ', aliases: ['FREQ', 'FILTER', 'PITCH'] },
+  { code: 'WAH', aliases: ['WAH'] },
+  { code: 'DRV', aliases: ['DRV', 'DRIVE', 'OD', 'DIST', 'DISTORTION'] },
+  { code: 'AMP', aliases: ['AMP', 'AMPLIFIER'] },
+  { code: 'CAB', aliases: ['CAB', 'CABINET', 'IR'] },
+  { code: 'MOD', aliases: ['MOD', 'MODULATION', 'CHORUS', 'FLANGER', 'PHASER', 'TREMOLO'] },
+  { code: 'DLY', aliases: ['DLY', 'DELAY'] },
+  { code: 'RVB', aliases: ['RVB', 'REVERB'] },
+  { code: 'VOL', aliases: ['VOL', 'VOLUME'] },
+];
+
+// Standard empty block: status byte 0 (OFF) + 4 zeroed fxid bytes. Knobs are
+// omitted because the effect is bypassed — the hardware reads the 0 status
+// and skips straight to the next slot.
+const EMPTY_BLOCK: number[] = [0, 0, 0, 0, 0];
+
 // Fixed header bytes (indices 0–25), discovered via reverse engineering.
 const HEADER_BYTES = [
   3, 2, 0, 0, 16, 11, 0, 128, 0, 5, 1, 4, 3, 12, 1, 5, 1, 15, 105, 2, 105, 164,
@@ -134,30 +163,53 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
   bytes.push(0); // terminador nulo
   bytes.push(...PRO_SIGNATURE);
 
-  // Bloco 3 — cadeia de sinal ativa.
-  // Diagnóstico: registra cada entrada da cadeia e se o fxid foi resolvido,
-  // para que presets truncados (apenas cabeçalho + rodapé) sejam fáceis de
-  // rastrear no console do navegador.
+  // Bloco 3 — cadeia de sinal em slots de hardware fixos.
+  // A pedaleira Matribox II Pro reserva exatamente 10 posições (DYN, FREQ,
+  // WAH, DRV, AMP, CAB, MOD, DLY, RVB, VOL). Iteramos obrigatoriamente nesta
+  // sequência para que cada bloco ocupe sua posição correta; slots não usados
+  // pela IA são preenchidos com o bloco vazio padrão, mantendo o
+  // alinhamento de tamanho que o software oficial exige.
+  const cadeia = ai.cadeia || [];
   // eslint-disable-next-line no-console
   console.groupCollapsed(
-    `[presetBuilder] buildPresetFile: ${ai.cadeia?.length ?? 0} módulos na cadeia`,
+    `[presetBuilder] buildPresetFile: ${cadeia.length} módulos na cadeia (10 slots fixos)`,
   );
   let resolvedCount = 0;
   let skippedCount = 0;
-  for (const entry of ai.cadeia || []) {
+  for (const slot of FIXED_SLOTS) {
+    // Procura a entrada da IA que pertence a este slot de hardware. Aceita
+    // qualquer alias definido acima. Pega a PRIMEIRA ocorrência; entradas
+    // adicionais do mesmo tipo são ignoradas (a pedaleira só tem um slot de
+    // cada).
+    const entry = cadeia.find((e) => {
+      const mod = (e.modulo || '').toUpperCase().trim();
+      return slot.aliases.includes(mod);
+    });
+
+    if (!entry) {
+      // Slot vazio: bloco zerado padrão do hardware.
+      bytes.push(...EMPTY_BLOCK);
+      // eslint-disable-next-line no-console
+      console.log(`[presetBuilder] EMPTY: ${slot.code} → ${EMPTY_BLOCK.join(',')}`);
+      continue;
+    }
+
     const fxid = resolveFxId(entry.nomeEfeito);
     if (fxid === undefined) {
+      // Efeito não resolvido no catálogo: ainda assim o slot precisa existir
+      // para manter o alinhamento, então emitimos o bloco vazio.
       skippedCount++;
+      bytes.push(...EMPTY_BLOCK);
       // eslint-disable-next-line no-console
       console.warn(
-        `[presetBuilder] SKIP: "${entry.nomeEfeito}" (${entry.modulo}) — fxid não encontrado no alg_data.json`,
+        `[presetBuilder] SKIP: "${entry.nomeEfeito}" (${slot.code}) — fxid não encontrado, slot preenchido com bloco vazio`,
       );
-      continue; // efeito desconhecido: não ocupa espaço
+      continue;
     }
     resolvedCount++;
     // eslint-disable-next-line no-console
     console.log(
-      `[presetBuilder] OK: "${entry.nomeEfeito}" (${entry.modulo}) → fxid=${fxid} (0x${fxid.toString(16)}) knobs=[${(entry.knobs || []).join(', ')}]`,
+      `[presetBuilder] OK: ${slot.code} "${entry.nomeEfeito}" → fxid=${fxid} (0x${fxid.toString(16)}) knobs=[${(entry.knobs || []).join(', ')}]`,
     );
     bytes.push(1); // status ON
     bytes.push(...fxidToBytes(fxid));
