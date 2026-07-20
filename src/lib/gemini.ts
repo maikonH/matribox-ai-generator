@@ -4,41 +4,24 @@ import { ALGORITHM_CATALOG } from './algorithmCatalog';
 import { getEffectiveApiKey } from './apiKeyStore';
 import type { AiPresetResponse, ChainEntry } from './presetBuilder';
 import { findSlotForCode } from './hardwareSlots';
-import algData from '../data/alg_data.json';
 
-const MODEL_NAME = 'gemini-3.1-flash-lite';
+const MODEL_NAME = 'gemini-3.1-flash';
 
-// Compact catalog projected from the bundled alg_data.json: one entry per
-// effect with its module code, fxid, exact fxTitle (the string presetBuilder
-// resolves to an fxid), and the ordered parameter names. The prose / origin /
-// mark fields are dropped so the payload stays at ~19KB instead of 850KB,
-// well within the Flash-Lite context window while still giving the model every
-// name and knob count it is allowed to use.
-type AlgWidget = { name: string };
-type AlgEntry = { fxid: number; fxtitle: string; widget?: AlgWidget[] };
-type AlgModule = { name: string; alg: AlgEntry[] };
-
-const ALG_MODULES: AlgModule[] = (algData as { Modules: AlgModule[] }).Modules;
+// The catalog sent to the Gemini model is projected dynamically from
+// src/data/alg_data.json (via ALGORITHM_CATALOG — the single projection of the
+// JSON, never re-read here). The projection strips fxid and verbose metadata:
+// the AI picks effects by name, and the application resolves the fxid locally
+// from the same JSON. This keeps the prompt compact (~19KB) while still giving
+// the model every name and knob count it is allowed to use.
 
 interface SlimEffect {
-  fxid: number;
   fxTitle: string;
   parametros: string[];
 }
+
 interface SlimModule {
   modulo: string;
   efeitos: SlimEffect[];
-}
-
-function slimFromAlgData(): SlimModule[] {
-  return ALG_MODULES.map((mod) => ({
-    modulo: mod.name,
-    efeitos: (mod.alg ?? []).map((alg) => ({
-      fxid: alg.fxid,
-      fxTitle: alg.fxtitle,
-      parametros: (alg.widget ?? []).map((w) => w.name),
-    })),
-  }));
 }
 
 function slimFromAlgorithms(algorithms: Algorithm[]): SlimModule[] {
@@ -47,7 +30,6 @@ function slimFromAlgorithms(algorithms: Algorithm[]): SlimModule[] {
     const key = a.type.toUpperCase();
     if (!byModule.has(key)) byModule.set(key, []);
     byModule.get(key)!.push({
-      fxid: Number(a.fxId),
       fxTitle: a.fxTitle,
       parametros: a.params.map((p) => p.name),
     });
@@ -58,22 +40,21 @@ function slimFromAlgorithms(algorithms: Algorithm[]): SlimModule[] {
 const SYSTEM_PROMPT = (catalog: SlimModule[]): string => {
   const catalogJson = JSON.stringify(catalog);
   const total = catalog.reduce((sum, mod) => sum + mod.efeitos.length, 0);
-  return `Você é um produtor musical e engenheiro de guitarra experiente, especialista na pedaleira Matribox II Pro (hardware QME-200). O usuário descreve um timbre em linguagem natural e você monta uma cadeia de sinal COMPLETA e integrada — amplificador, gabinete e pedais de ganho/ambientes ativados juntos para entregar o som pedido, nunca módulos soltos.
+  return `Você é um produtor musical e engenheiro de guitarra experiente, especialista na pedaleira Matribox II Pro. O usuário descreve um timbre em linguagem natural e você monta uma cadeia de sinal COMPLETA e integrada — amplificador, gabinete e pedais de ganho/ambientes ativados juntos para entregar o som pedido, nunca módulos soltos.
 
-Você DEVE escolher os nomes dos efeitos e os módulos baseando-se estritamente neste catálogo oficial anexado aqui: ${catalogJson}. Não invente nenhum nome ou módulo fora desta lista.
-
-Cada objeto do catálogo tem "modulo" (DYN, FREQ, WAH, DRV, AMP, CAB, MOD, DLY, RVB, VOL), "fxid", "fxTitle" (o nome exato que você devolve em "nomeEfeito") e "parametros" (a lista ordenada dos knobs). Existem ${total} efeitos disponíveis.
+Escolha os efeitos e os módulos estritamente a partir deste catálogo oficial anexado: ${catalogJson}. Não invente nenhum nome, efeito, amplificador ou gabinete fora desta lista. Existem ${total} efeitos disponíveis, organizados por módulo. Cada efeito tem "fxTitle" (o nome exato que você devolve em "nomeEfeito") e "parametros" (a lista ordenada dos knobs).
 
 REGRAS:
 1. Responda com UM único objeto JSON válido, sem markdown, sem code fences, sem texto fora do JSON.
-2. "nomeEfeito" deve ser o fxTitle exato do catálogo (cópia idêntica, incluindo espaços e caixa). Nunca invente nomes.
-3. "nomePatch": máximo 12 caracteres alfanuméricos, sem espaços, acentos ou símbolos.
-4. "comentario": em português, explique quais pedais/amp/cab escolheu e por que combinam com o pedido.
-5. "cadeia": array de módulos ativos na ordem do sinal. Cada item tem "modulo" (código do catálogo), "nomeEfeito" (fxTitle exato) e "knobs" (array de inteiros 0–100, um por item de "parametros", na mesma ordem).
-6. É OBRIGATÓRIO incluir exatamente UM módulo AMP e UM módulo CAB, ambos do catálogo, com o gabinete sendo o par natural do amplificador.
-7. Sempre inclua um módulo VOL final com o fxTitle "Volume". Seu knob é o volume master: alto ganho → 55–75, crunch → 72–85, limpo → 85–100.
-8. O número e a ordem dos knobs DEVEM corresponder exatamente a "parametros" do fxTitle. Um valor 0–100 para cada, na mesma ordem.
-9. FIDELIDADE AO PROMPT: o nomePatch, o comentario e a escolha de amp + cab + drive DEVEM refletir o gênero/artista pedido (ex: Metalcore → amp de alto ganho + cab 4x12 + distorção pesada). Nunca troque por outro gênero.
+2. Nunca inclua fxid, bytes, Base64 ou buffers na resposta. A aplicação localiza os FXIDs a partir do catálogo.
+3. "nomeEfeito" deve ser o fxTitle exato do catálogo (cópia idêntica, incluindo espaços e caixa). Nunca invente nomes.
+4. "nomePatch": máximo 12 caracteres alfanuméricos, sem espaços, acentos ou símbolos.
+5. "comentario": em português, explique quais pedais/amp/cab escolheu e por que combinam com o pedido.
+6. "cadeia": array de módulos ativos na ordem do sinal. Cada item tem "modulo" (código do catálogo), "nomeEfeito" (fxTitle exato) e "knobs" (array de inteiros 0–100, um por item de "parametros", na mesma ordem).
+7. É OBRIGATÓRIO incluir exatamente UM módulo AMP e UM módulo CAB, ambos do catálogo, com o gabinete sendo o par natural do amplificador.
+8. Sempre inclua um módulo VOL final com o fxTitle "Volume". Seu knob é o volume master: alto ganho → 55–75, crunch → 72–85, limpo → 85–100.
+9. O número e a ordem dos knobs DEVEM corresponder exatamente a "parametros" do fxTitle. Um valor 0–100 para cada, na mesma ordem.
+10. FIDELIDADE AO PROMPT: o nomePatch, o comentario e a escolha de amp + cab + drive DEVEM refletir o gênero/artista pedido (ex: Metalcore → amp de alto ganho + cab 4x12 + distorção pesada). Nunca troque por outro gênero.
 
 FORMATO DA RESPOSTA:
 {
@@ -109,8 +90,9 @@ function sanitizePatchName(name: string): string {
 }
 
 /**
- * Normalize the raw AI JSON into a validated AiPresetResponse. Empty effect
- * names are dropped from the chain; knobs are clamped to 0–100.
+ * Normalize the raw AI JSON into a typed AiPresetResponse. Entries with an
+ * empty effect name are dropped as noise; knobs are clamped to 0–100. This
+ * does NOT validate against the catalog — that is validateAiResponse's job.
  */
 export function normalizeAiResponse(raw: RawAiPreset): AiPresetResponse {
   const cadeia: ChainEntry[] = [];
@@ -132,6 +114,46 @@ export function normalizeAiResponse(raw: RawAiPreset): AiPresetResponse {
 }
 
 /**
+ * Validate the normalized AI response against the catalog (the alg_data.json
+ * projection). Every entry must reference a known hardware module, an effect
+ * that exists in the catalog, and the exact knob count the effect defines.
+ * Throws on any validation failure so no preset is rendered and no .prst is
+ * built — per spec, the app never generates a file when validation fails.
+ */
+export function validateAiResponse(ai: AiPresetResponse, catalog: Algorithm[]): AiPresetResponse {
+  const byTitle = new Map(catalog.map((a) => [a.fxTitle.toLowerCase(), a]));
+  const errors: string[] = [];
+
+  if (ai.cadeia.length === 0) {
+    errors.push('A IA não retornou nenhum módulo na cadeia.');
+  }
+
+  ai.cadeia.forEach((entry, i) => {
+    const pos = i + 1;
+    const slot = findSlotForCode(entry.modulo);
+    if (!slot) {
+      errors.push(`Módulo "${entry.modulo}" (posição ${pos}) não existe na Matribox II Pro.`);
+      return;
+    }
+    const alg = byTitle.get(entry.nomeEfeito.toLowerCase());
+    if (!alg) {
+      errors.push(`Efeito "${entry.nomeEfeito}" (posição ${pos}) não existe em alg_data.json.`);
+      return;
+    }
+    if (entry.knobs.length !== alg.params.length) {
+      errors.push(
+        `Efeito "${entry.nomeEfeito}" (posição ${pos}): ${entry.knobs.length} knobs recebidos, ${alg.params.length} esperados.`,
+      );
+    }
+  });
+
+  if (errors.length > 0) {
+    throw new Error(`Validação do preset falhou:\n${errors.join('\n')}`);
+  }
+  return ai;
+}
+
+/**
  * Project the validated AI response onto the UI. Returns ONLY the modules the
  * AI actually activated, in the order the AI returned them — the UI renders
  * exactly this list and nothing else. The 10-slot padding with zeroed bypass
@@ -140,7 +162,7 @@ export function normalizeAiResponse(raw: RawAiPreset): AiPresetResponse {
 export function aiResponseToPreset(ai: AiPresetResponse): GeneratedPreset {
   const byTitle = new Map(ALGORITHM_CATALOG.map((a) => [a.fxTitle.toLowerCase(), a]));
   const modules: PresetModule[] = [];
-  for (const entry of ai.cadeia || []) {
+  for (const entry of ai.cadeia) {
     const slot = findSlotForCode(entry.modulo);
     const alg = byTitle.get(entry.nomeEfeito.toLowerCase());
     if (!slot || !alg) continue;
@@ -182,12 +204,17 @@ export async function generatePreset(
     );
   }
 
-  const catalog = algorithms.length > 0 ? slimFromAlgorithms(algorithms) : slimFromAlgData();
+  // Single source of truth: the alg_data.json projection (ALGORITHM_CATALOG),
+  // or a user-uploaded replacement when present. The same set builds the
+  // prompt and validates the response, so the AI can never pick an effect the
+  // app cannot resolve.
+  const catalog = algorithms.length > 0 ? algorithms : ALGORITHM_CATALOG;
+  const slim = slimFromAlgorithms(catalog);
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
     model: MODEL_NAME,
-    systemInstruction: { role: 'system', parts: [{ text: SYSTEM_PROMPT(catalog) }] },
+    systemInstruction: { role: 'system', parts: [{ text: SYSTEM_PROMPT(slim) }] },
     generationConfig: { temperature: 0.7, responseMimeType: 'application/json' },
   });
 
@@ -217,5 +244,5 @@ export async function generatePreset(
     }
   }
 
-  return normalizeAiResponse(parsed);
+  return validateAiResponse(normalizeAiResponse(parsed), catalog);
 }
