@@ -71,7 +71,7 @@ export default function SignalBlock({ module, index, onParamChange }: Props) {
   if (!module || !module.fxId) {
     return (
       <div className="bg-surface border border-dashed border-border rounded-xl px-4 py-3 text-xs text-slate-500">
-        Slot vazio
+        Desligado (Bypass)
       </div>
     );
   }

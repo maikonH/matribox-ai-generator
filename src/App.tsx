@@ -9,6 +9,7 @@ import { loadAlgorithmsAsync } from './lib/algorithmStore';
 import { ALGORITHM_COUNT } from './lib/algorithmCatalog';
 import { generatePreset, aiResponseToPreset } from './lib/gemini';
 import { buildPresetFile, downloadPresetFile, type AiPresetResponse, type BuiltPreset } from './lib/presetBuilder';
+import { findCadeiaIndexForSlot } from './lib/hardwareSlots';
 import type { Algorithm, GeneratedPreset } from './lib/types';
 
 export default function App() {
@@ -81,19 +82,24 @@ export default function App() {
         return { ...prev, modules };
       });
       // Keep the built preset file in sync with knob edits so the download
-      // always reflects the current slider state.
+      // always reflects the current slider state. `moduleIndex` is the
+      // hardware slot index (0–9); translate it to the index within the AI's
+      // cadeia array before mutating knobs there.
       const prevAi = aiResponseRef.current;
       if (prevAi) {
-        const cadeia = prevAi.cadeia.map((entry, i) => {
-          if (i !== moduleIndex) return entry;
-          const knobs = entry.knobs.map((k, kIdx) =>
-            kIdx === paramIndex ? Math.round(value) : k,
-          );
-          return { ...entry, knobs };
-        });
-        const updated = { ...prevAi, cadeia };
-        aiResponseRef.current = updated;
-        setBuiltPreset(buildPresetFile(updated));
+        const cadeiaIdx = findCadeiaIndexForSlot(prevAi.cadeia || [], moduleIndex);
+        if (cadeiaIdx >= 0) {
+          const cadeia = prevAi.cadeia.map((entry, i) => {
+            if (i !== cadeiaIdx) return entry;
+            const knobs = entry.knobs.map((k, kIdx) =>
+              kIdx === paramIndex ? Math.round(value) : k,
+            );
+            return { ...entry, knobs };
+          });
+          const updated = { ...prevAi, cadeia };
+          aiResponseRef.current = updated;
+          setBuiltPreset(buildPresetFile(updated));
+        }
       }
     },
     [],

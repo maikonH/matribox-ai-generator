@@ -1,5 +1,6 @@
 import type { PresetModule } from '../lib/types';
 import SignalBlock from './SignalBlock';
+import { HARDWARE_SLOTS } from '../lib/hardwareSlots';
 
 interface Props {
   modules: PresetModule[];
@@ -7,24 +8,36 @@ interface Props {
 }
 
 export default function SignalChain({ modules, onParamChange }: Props) {
-  if (modules.length === 0) return null;
+  // Always render the 10 hardware slots in fixed order. The modules array
+  // is pre-built to match HARDWARE_SLOTS 1:1, but we guard against short
+  // arrays for safety.
+  const activeCount = modules.filter((m) => m && m.enabled && m.fxId).length;
 
   return (
     <div>
       <div className="flex items-center gap-2 mb-4">
         <h3 className="text-white font-semibold text-sm tracking-tight">Cadeia de Sinal</h3>
-        <span className="text-xs text-slate-500 tabular-nums">({modules.length} módulos)</span>
+        <span className="text-xs text-slate-500 tabular-nums">
+          ({activeCount} ativos / {HARDWARE_SLOTS.length} slots)
+        </span>
       </div>
 
       <div className="space-y-2">
-        {modules.map((mod, idx) => {
-          if (!mod || !mod.fxId) {
+        {HARDWARE_SLOTS.map((slot, idx) => {
+          const mod = modules[idx];
+          const isActive = !!mod && !!mod.fxId && mod.enabled !== false;
+          if (!isActive) {
             return (
               <div
-                key={`empty-${idx}`}
-                className="bg-surface border border-dashed border-border rounded-xl px-4 py-3 text-xs text-slate-500"
+                key={`bypass-${slot.code}-${idx}`}
+                className="bg-surface border border-dashed border-border rounded-xl px-4 py-3 text-xs text-slate-500 flex items-center gap-3"
               >
-                Slot {idx + 1} vazio
+                <span className="flex items-center justify-center h-7 w-7 rounded-md bg-surface-light border border-border text-slate-600 flex-shrink-0 text-[10px] font-mono">
+                  {idx + 1}
+                </span>
+                <span className="font-medium text-slate-400">{slot.code}</span>
+                <span className="text-slate-600">·</span>
+                <span className="text-slate-500">Desligado (Bypass)</span>
               </div>
             );
           }

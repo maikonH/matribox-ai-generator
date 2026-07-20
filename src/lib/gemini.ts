@@ -3,6 +3,7 @@ import type { Algorithm, GeneratedPreset, PresetModule } from './types';
 import { ALGORITHM_CATALOG } from './algorithmCatalog';
 import { getEffectiveApiKey } from './apiKeyStore';
 import type { AiPresetResponse, ChainEntry } from './presetBuilder';
+import { HARDWARE_SLOTS, findCadeiaIndexForSlot } from './hardwareSlots';
 
 const MODEL_NAME = 'gemini-3.1-flash-lite';
 
@@ -132,14 +133,29 @@ export function normalizeAiResponse(raw: RawAiPreset): AiPresetResponse {
 
 /**
  * Convert the validated AI response into the GeneratedPreset shape the UI
- * signal-chain renderer expects. Each cadeia entry is resolved against the
- * catalog so the sliders show real parameter names and ranges.
+ * signal-chain renderer expects. The UI always shows exactly the 10 hardware
+ * slots of the Matribox II Pro, in fixed order. For each slot we look up the
+ * matching cadeia entry by its `modulo` code; when the AI did not activate a
+ * slot we emit a bypassed placeholder so the UI can render "Desligado
+ * (Bypass)" and the file builder can write the zeroed block.
  */
 export function aiResponseToPreset(ai: AiPresetResponse): GeneratedPreset {
   const byTitle = new Map(ALGORITHM_CATALOG.map((a) => [a.fxTitle.toLowerCase(), a]));
-  const modules: PresetModule[] = ai.cadeia.map((entry) => {
+  const cadeia = ai.cadeia || [];
+  const modules: PresetModule[] = HARDWARE_SLOTS.map((slot, slotIndex) => {
+    const entryIndex = findCadeiaIndexForSlot(cadeia, slotIndex);
+    const entry = entryIndex >= 0 ? cadeia[entryIndex] : undefined;
+    if (!entry) {
+      return {
+        fxId: '',
+        fxTitle: 'Desligado (Bypass)',
+        type: slot.uiType,
+        subType: slot.uiType,
+        enabled: false,
+        params: [],
+      };
+    }
     const alg = byTitle.get(entry.nomeEfeito.toLowerCase());
-    const type = MODULE_CODE_TO_TYPE[entry.modulo] || entry.modulo || (alg?.type ?? 'UNKNOWN');
     const params = (alg?.params || []).map((p, i) => ({
       name: p.name,
       displayName: p.displayName,
@@ -151,8 +167,9 @@ export function aiResponseToPreset(ai: AiPresetResponse): GeneratedPreset {
     return {
       fxId: alg?.fxId || '',
       fxTitle: alg?.fxTitle || entry.nomeEfeito,
-      type,
-      subType: type,
+      type: slot.uiType,
+      subType: slot.uiType,
+      enabled: true,
       params,
     };
   });

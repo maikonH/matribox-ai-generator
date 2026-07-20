@@ -1,15 +1,17 @@
 // Matribox II Pro (QME-200) preset file builder.
 //
 // The device stores presets as a flat linear byte stream: a fixed header,
-// the patch name as ASCII + a PRO signature, the active signal chain as a
-// sequence of (status + 4-byte fxid + knob values) blocks, and a fixed
-// footer. Inactive blocks are simply omitted — they occupy no space.
+// the patch name as ASCII + a PRO signature, the signal chain as exactly 10
+// slot blocks (one per hardware position), and a fixed footer. Each slot is
+// always present — an inactive slot is written as a zeroed block so the
+// following slots stay aligned to the positions the editor expects.
 //
 // The fxid values in alg_data.json are 32-bit integers (e.g. 50331648 for
 // the first DRV). They are serialized here as 4 individual bytes in
 // little-endian order, which is what the official Matribox editor expects.
 
 import algData from '../data/alg_data.json';
+import { HARDWARE_SLOTS, findCadeiaIndexForSlot } from './hardwareSlots';
 
 type AlgEntry = {
   fxid: number;
@@ -36,30 +38,6 @@ for (const mod of MODULES) {
     if (alg.name) FX_NAME_TO_ID.set(alg.name.toLowerCase(), alg.fxid);
   }
 }
-
-// The Matribox II Pro hardware expects exactly 10 effect slots, in this
-// fixed order, between the patch name and the footer. Each slot must be
-// present in the byte stream — omitting an inactive slot shifts every
-// subsequent block out of position and the editor rejects the file.
-//
-// Each slot is emitted as either:
-//   active:  [1, fxid0, fxid1, fxid2, fxid3, knob0, knob1, ...]
-//   empty:   [0, 0, 0, 0, 0]  (status OFF + zeroed 4-byte fxid, no knobs)
-//
-// `aliases` are the module codes the AI may return in the `modulo` field;
-// the first alias is the canonical hardware slot code.
-const FIXED_SLOTS: { code: string; aliases: string[] }[] = [
-  { code: 'DYN', aliases: ['DYN', 'DYNAMICS'] },
-  { code: 'FREQ', aliases: ['FREQ', 'FILTER', 'PITCH'] },
-  { code: 'WAH', aliases: ['WAH'] },
-  { code: 'DRV', aliases: ['DRV', 'DRIVE', 'OD', 'DIST', 'DISTORTION'] },
-  { code: 'AMP', aliases: ['AMP', 'AMPLIFIER'] },
-  { code: 'CAB', aliases: ['CAB', 'CABINET', 'IR'] },
-  { code: 'MOD', aliases: ['MOD', 'MODULATION', 'CHORUS', 'FLANGER', 'PHASER', 'TREMOLO'] },
-  { code: 'DLY', aliases: ['DLY', 'DELAY'] },
-  { code: 'RVB', aliases: ['RVB', 'REVERB'] },
-  { code: 'VOL', aliases: ['VOL', 'VOLUME'] },
-];
 
 // Standard empty block: status byte 0 (OFF) + 4 zeroed fxid bytes. Knobs are
 // omitted because the effect is bypassed — the hardware reads the 0 status
@@ -165,26 +143,25 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
 
   // Bloco 3 — cadeia de sinal em slots de hardware fixos.
   // A pedaleira Matribox II Pro reserva exatamente 10 posições (DYN, FREQ,
-  // WAH, DRV, AMP, CAB, MOD, DLY, RVB, VOL). Iteramos obrigatoriamente nesta
+  // WAH, DRV, AMP, CAB, MOD, DELAY, RVB, VOL). Iteramos obrigatoriamente nesta
   // sequência para que cada bloco ocupe sua posição correta; slots não usados
   // pela IA são preenchidos com o bloco vazio padrão, mantendo o
   // alinhamento de tamanho que o software oficial exige.
   const cadeia = ai.cadeia || [];
   // eslint-disable-next-line no-console
   console.groupCollapsed(
-    `[presetBuilder] buildPresetFile: ${cadeia.length} módulos na cadeia (10 slots fixos)`,
+    `[presetBuilder] buildPresetFile: ${cadeia.length} módulos na cadeia (${HARDWARE_SLOTS.length} slots fixos)`,
   );
   let resolvedCount = 0;
   let skippedCount = 0;
-  for (const slot of FIXED_SLOTS) {
-    // Procura a entrada da IA que pertence a este slot de hardware. Aceita
-    // qualquer alias definido acima. Pega a PRIMEIRA ocorrência; entradas
-    // adicionais do mesmo tipo são ignoradas (a pedaleira só tem um slot de
-    // cada).
-    const entry = cadeia.find((e) => {
-      const mod = (e.modulo || '').toUpperCase().trim();
-      return slot.aliases.includes(mod);
-    });
+  for (let slotIndex = 0; slotIndex < HARDWARE_SLOTS.length; slotIndex++) {
+    const slot = HARDWARE_SLOTS[slotIndex];
+    // Varre a cadeia da IA procurando a entrada cujo `modulo` pertence a
+    // este slot de hardware. Aceita qualquer alias definido em hardwareSlots.
+    // Pega a PRIMEIRA ocorrência; entradas adicionais do mesmo tipo são
+    // ignoradas (a pedaleira só tem um slot de cada).
+    const entryIndex = findCadeiaIndexForSlot(cadeia, slotIndex);
+    const entry = entryIndex >= 0 ? cadeia[entryIndex] : undefined;
 
     if (!entry) {
       // Slot vazio: bloco zerado padrão do hardware.
