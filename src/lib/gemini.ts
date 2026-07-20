@@ -5,7 +5,7 @@ import { getEffectiveApiKey } from './apiKeyStore';
 import type { AiPresetResponse, ChainEntry } from './presetBuilder';
 import { findSlotForCode } from './hardwareSlots';
 
-const MODEL_NAME = 'gemini-3.1-flash';
+const MODEL_NAME = 'gemini-3.1-flash-lite';
 
 // The catalog sent to the Gemini model is projected dynamically from
 // src/data/alg_data.json (via ALGORITHM_CATALOG — the single projection of the
