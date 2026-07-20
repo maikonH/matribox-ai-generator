@@ -27,6 +27,7 @@ type RawAlgorithm = Record<string, unknown> & {
   parameters?: RawParam[];
   controls?: RawParam[];
   widget?: RawParam[];
+  _moduleType?: string;
 };
 
 function asString(val: unknown, fallback = ''): string {
@@ -77,8 +78,8 @@ function normalizeAlgorithm(raw: RawAlgorithm): Algorithm | null {
   return {
     fxId: fxId || fxTitle.toLowerCase().replace(/\s+/g, '_'),
     fxTitle: fxTitle || `Algorithm ${fxId}`,
-    type: asString(raw.type, 'unknown'),
-    subType: asString(raw.subType, raw.subtype ?? ''),
+    type: raw._moduleType ? asString(raw._moduleType, 'unknown') : asString(raw.type, 'unknown'),
+    subType: asString(raw.subType, raw.subtype ?? raw.type ?? ''),
     category: raw.category ? asString(raw.category) : undefined,
     description: raw.description ? asString(raw.description) : undefined,
     params,
@@ -106,12 +107,12 @@ function isLeafAlgorithm(obj: Record<string, unknown>): boolean {
   return 'fxId' in obj || 'id' in obj || 'effectId' in obj;
 }
 
-function deepCollectAlgorithms(raw: unknown, depth: number, out: RawAlgorithm[]): void {
+function deepCollectAlgorithms(raw: unknown, depth: number, out: RawAlgorithm[], moduleType?: string): void {
   if (depth > 12) return;
 
   if (Array.isArray(raw)) {
     for (const item of raw) {
-      deepCollectAlgorithms(item, depth + 1, out);
+      deepCollectAlgorithms(item, depth + 1, out, moduleType);
     }
     return;
   }
@@ -119,18 +120,24 @@ function deepCollectAlgorithms(raw: unknown, depth: number, out: RawAlgorithm[])
   if (raw && typeof raw === 'object') {
     const obj = raw as Record<string, unknown>;
 
+    // A group/module wrapper carries a `name` + an `alg` array (the
+    // alg_data.json top-level "Modules" shape). Its name is the canonical
+    // hardware module code (DYN, DRV, AMP, CAB, …) and must be propagated to
+    // every leaf algorithm inside it, otherwise the effect's own `type`
+    // (e.g. " 4 x 12”", "/", "Comp") leaks into the catalog as the module code
+    // the Gemini prompt and the validator both rely on.
+    const childModuleType = typeof obj.name === 'string' && Array.isArray(obj.alg)
+      ? obj.name
+      : moduleType;
+
     if (isLeafAlgorithm(obj)) {
-      out.push(obj as RawAlgorithm);
-      // A leaf algorithm carries its own params/widget; do not recurse into
-      // it — its children are parameter widgets, not algorithms.
+      out.push({ ...(obj as RawAlgorithm), _moduleType: childModuleType });
       return;
     }
 
-    // Not a leaf: recurse into children so we reach the real entries nested
-    // inside group/module wrappers.
     for (const val of Object.values(obj)) {
       if (val && typeof val === 'object') {
-        deepCollectAlgorithms(val, depth + 1, out);
+        deepCollectAlgorithms(val, depth + 1, out, childModuleType);
       }
     }
   }
@@ -143,9 +150,9 @@ export function validateAlgData(rawJson: string): ValidationResult {
   } catch (e) {
     return {
       success: false,
-      algorithms: [],
-      error: `JSON inválido: ${(e as Error).message}`,
-      count: 0,
+        algorithms: [],
+        error: `JSON inválido: ${(e as Error).message}`,
+        count: 0,
     };
   }
 

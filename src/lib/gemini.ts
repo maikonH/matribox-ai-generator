@@ -5,7 +5,7 @@ import { getEffectiveApiKey } from './apiKeyStore';
 import type { AiPresetResponse, ChainEntry } from './presetBuilder';
 import { findSlotForCode } from './hardwareSlots';
 
-const MODEL_NAME = 'gemini-3.1-flash-lite';
+const MODEL_NAME = 'gemini-2.5-flash';
 
 // The catalog sent to the Gemini model is projected dynamically from
 // src/data/alg_data.json (via ALGORITHM_CATALOG — the single projection of the
@@ -37,6 +37,10 @@ function slimFromAlgorithms(algorithms: Algorithm[]): SlimModule[] {
   return Array.from(byModule.entries()).map(([modulo, efeitos]) => ({ modulo, efeitos }));
 }
 
+// Canonical hardware module codes the AI is allowed to emit in `cadeia[].modulo`.
+// Kept in sync with HARDWARE_SLOTS in hardwareSlots.ts.
+const ALLOWED_MODULE_CODES = ['DYN', 'FREQ', 'WAH', 'DRV', 'AMP', 'CAB', 'MOD', 'DELAY', 'RVB', 'VOL'];
+
 const SYSTEM_PROMPT = (catalog: SlimModule[]): string => {
   const catalogJson = JSON.stringify(catalog);
   const total = catalog.reduce((sum, mod) => sum + mod.efeitos.length, 0);
@@ -50,7 +54,7 @@ REGRAS:
 3. "nomeEfeito" deve ser o fxTitle exato do catálogo (cópia idêntica, incluindo espaços e caixa). Nunca invente nomes.
 4. "nomePatch": máximo 12 caracteres alfanuméricos, sem espaços, acentos ou símbolos.
 5. "comentario": em português, explique quais pedais/amp/cab escolheu e por que combinam com o pedido.
-6. "cadeia": array de módulos ativos na ordem do sinal. Cada item tem "modulo" (código do catálogo), "nomeEfeito" (fxTitle exato) e "knobs" (array de inteiros 0–100, um por item de "parametros", na mesma ordem).
+6. "cadeia": array de módulos ativos na ordem do sinal. Cada item tem EXATAMENTE três campos:\n   - "modulo": o código do módulo (apenas o campo "modulo" do catálogo). Os únicos valores permitidos são: ${ALLOWED_MODULE_CODES.join(', ')}. Nunca use o fxTitle, o nome do efeito, nem o subtipo do efeito (ex.: "4 X 12", "/", "Comp") como "modulo".\n   - "nomeEfeito": o fxTitle exato do catálogo.\n   - "knobs": array de inteiros 0–100, um por item de "parametros", na mesma ordem.
 7. É OBRIGATÓRIO incluir exatamente UM módulo AMP e UM módulo CAB, ambos do catálogo, com o gabinete sendo o par natural do amplificador.
 8. Sempre inclua um módulo VOL final com o fxTitle "Volume". Seu knob é o volume master: alto ganho → 55–75, crunch → 72–85, limpo → 85–100.
 9. O número e a ordem dos knobs DEVEM corresponder exatamente a "parametros" do fxTitle. Um valor 0–100 para cada, na mesma ordem.
@@ -89,6 +93,19 @@ function sanitizePatchName(name: string): string {
   return cleaned || 'Preset';
 }
 
+// Normalize a name for comparison only — the original string is preserved for
+// display. Collapses whitespace, lowercases, maps typographic quotes and the
+// multiplication sign to ASCII, so "4 X 12", "4x12" and "4×12" all match.
+function normalizeForCompare(name: string): string {
+  return (name || '')
+    .normalize('NFKC')
+    .replace(/[\u2018\u2019\u201C\u201D\u0060\u00B4]/g, "'")
+    .replace(/[\u00D7\u2715]/g, 'x')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 /**
  * Normalize the raw AI JSON into a typed AiPresetResponse. Entries with an
  * empty effect name are dropped as noise; knobs are clamped to 0–100. This
@@ -121,7 +138,7 @@ export function normalizeAiResponse(raw: RawAiPreset): AiPresetResponse {
  * built — per spec, the app never generates a file when validation fails.
  */
 export function validateAiResponse(ai: AiPresetResponse, catalog: Algorithm[]): AiPresetResponse {
-  const byTitle = new Map(catalog.map((a) => [a.fxTitle.toLowerCase(), a]));
+  const byTitle = new Map(catalog.map((a) => [normalizeForCompare(a.fxTitle), a]));
   const errors: string[] = [];
 
   if (ai.cadeia.length === 0) {
@@ -132,10 +149,10 @@ export function validateAiResponse(ai: AiPresetResponse, catalog: Algorithm[]): 
     const pos = i + 1;
     const slot = findSlotForCode(entry.modulo);
     if (!slot) {
-      errors.push(`Módulo "${entry.modulo}" (posição ${pos}) não existe na Matribox II Pro.`);
+      errors.push(`Módulo "${entry.modulo}" (posição ${pos}) não existe na Matribox II Pro. Códigos permitidos: ${ALLOWED_MODULE_CODES.join(', ')}.`);
       return;
     }
-    const alg = byTitle.get(entry.nomeEfeito.toLowerCase());
+    const alg = byTitle.get(normalizeForCompare(entry.nomeEfeito));
     if (!alg) {
       errors.push(`Efeito "${entry.nomeEfeito}" (posição ${pos}) não existe em alg_data.json.`);
       return;
@@ -160,11 +177,11 @@ export function validateAiResponse(ai: AiPresetResponse, catalog: Algorithm[]): 
  * blocks happens exclusively inside buildPresetFile, never here.
  */
 export function aiResponseToPreset(ai: AiPresetResponse): GeneratedPreset {
-  const byTitle = new Map(ALGORITHM_CATALOG.map((a) => [a.fxTitle.toLowerCase(), a]));
+  const byTitle = new Map(ALGORITHM_CATALOG.map((a) => [normalizeForCompare(a.fxTitle), a]));
   const modules: PresetModule[] = [];
   for (const entry of ai.cadeia) {
     const slot = findSlotForCode(entry.modulo);
-    const alg = byTitle.get(entry.nomeEfeito.toLowerCase());
+    const alg = byTitle.get(normalizeForCompare(entry.nomeEfeito));
     if (!slot || !alg) continue;
     const params = alg.params.map((p, i) => ({
       name: p.name,
@@ -244,5 +261,16 @@ export async function generatePreset(
     }
   }
 
-  return validateAiResponse(normalizeAiResponse(parsed), catalog);
+  // Audit trail: raw response, parsed JSON, and the object handed to the
+  // validator. Surface these to the console so a validation failure can be
+  // traced to the exact field that diverged.
+  const normalized = normalizeAiResponse(parsed);
+  console.log('===== GEMINI RAW RESPONSE =====');
+  console.log(text);
+  console.log('===== PARSED JSON =====');
+  console.log(JSON.stringify(parsed, null, 2));
+  console.log('===== VALIDATION INPUT =====');
+  console.table(normalized.cadeia);
+
+  return validateAiResponse(normalized, catalog);
 }
