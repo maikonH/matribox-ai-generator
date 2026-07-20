@@ -183,18 +183,12 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
 }
 
 /**
- * Trigger a browser download of the built preset as a .prst file. The file
- * contents are the Base64 payload decoded back to binary so the editor
- * receives the exact byte stream the device expects.
+ * Trigger a browser download of the built preset as a .prst file. The pedal
+ * editor expects a plain-text file whose sole contents are the Base64-encoded
+ * byte stream — raw binary is rejected, so we must NOT decode back to bytes.
  */
 export function downloadPresetFile(built: BuiltPreset): void {
-  const byteChars = atob(built.base64);
-  const byteNumbers = new Array(byteChars.length);
-  for (let i = 0; i < byteChars.length; i++) {
-    byteNumbers[i] = byteChars.charCodeAt(i);
-  }
-  const byteArray = new Uint8Array(byteNumbers);
-  const blob = new Blob([byteArray], { type: 'application/octet-stream' });
+  const blob = new Blob([built.base64], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
