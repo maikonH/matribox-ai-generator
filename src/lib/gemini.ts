@@ -3,7 +3,7 @@ import type { Algorithm, GeneratedPreset, PresetModule } from './types';
 import { ALGORITHM_CATALOG } from './algorithmCatalog';
 import { getEffectiveApiKey } from './apiKeyStore';
 import type { AiPresetResponse, ChainEntry } from './presetBuilder';
-import { HARDWARE_SLOTS, findCadeiaIndexForSlot } from './hardwareSlots';
+import { findSlotForCode } from './hardwareSlots';
 import algData from '../data/alg_data.json';
 
 const MODEL_NAME = 'gemini-3.1-flash-lite';
@@ -132,29 +132,19 @@ export function normalizeAiResponse(raw: RawAiPreset): AiPresetResponse {
 }
 
 /**
- * Project the validated AI response onto the 10 fixed hardware slots the UI
- * renders. Slots the AI did not activate become bypassed placeholders so the
- * UI can show "Desligado (Bypass)" and the file builder can write the zeroed
- * block.
+ * Project the validated AI response onto the UI. Returns ONLY the modules the
+ * AI actually activated, in the order the AI returned them — the UI renders
+ * exactly this list and nothing else. The 10-slot padding with zeroed bypass
+ * blocks happens exclusively inside buildPresetFile, never here.
  */
 export function aiResponseToPreset(ai: AiPresetResponse): GeneratedPreset {
   const byTitle = new Map(ALGORITHM_CATALOG.map((a) => [a.fxTitle.toLowerCase(), a]));
-  const cadeia = ai.cadeia || [];
-  const modules: PresetModule[] = HARDWARE_SLOTS.map((slot, slotIndex) => {
-    const entryIndex = findCadeiaIndexForSlot(cadeia, slotIndex);
-    const entry = entryIndex >= 0 ? cadeia[entryIndex] : undefined;
-    if (!entry) {
-      return {
-        fxId: '',
-        fxTitle: 'Desligado (Bypass)',
-        type: slot.uiType,
-        subType: slot.uiType,
-        enabled: false,
-        params: [],
-      };
-    }
+  const modules: PresetModule[] = [];
+  for (const entry of ai.cadeia || []) {
+    const slot = findSlotForCode(entry.modulo);
     const alg = byTitle.get(entry.nomeEfeito.toLowerCase());
-    const params = (alg?.params || []).map((p, i) => ({
+    if (!slot || !alg) continue;
+    const params = alg.params.map((p, i) => ({
       name: p.name,
       displayName: p.displayName,
       value: i < entry.knobs.length ? entry.knobs[i] : p.value,
@@ -162,15 +152,15 @@ export function aiResponseToPreset(ai: AiPresetResponse): GeneratedPreset {
       max: p.max,
       unit: p.unit,
     }));
-    return {
-      fxId: alg?.fxId || '',
-      fxTitle: alg?.fxTitle || entry.nomeEfeito,
+    modules.push({
+      fxId: alg.fxId,
+      fxTitle: alg.fxTitle,
       type: slot.uiType,
       subType: slot.uiType,
       enabled: true,
       params,
-    };
-  });
+    });
+  }
 
   return {
     title: ai.nomePatch,
