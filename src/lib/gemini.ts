@@ -4,7 +4,7 @@ import { ALGORITHM_CATALOG } from './algorithmCatalog';
 import { getEffectiveApiKey } from './apiKeyStore';
 import type { AiPresetResponse, ChainEntry } from './presetBuilder';
 
-const MODEL_NAME = 'gemini-3.1-flash-lite';
+const MODEL_NAME = 'gemini-1.5-flash';
 
 // Map the AI's short module codes (DRV, DLY, RVB, …) to the canonical slot
 // types used by the UI's signal-chain renderer.
@@ -189,9 +189,9 @@ export async function generatePreset(
         responseMimeType: 'application/json',
       },
     },
-    // Pin the stable v1 endpoint. The SDK defaults to v1beta, where the
-    // '-lite' model suffix is not published and returns 404.
-    { apiVersion: 'v1' },
+    // Use the v1beta endpoint, which natively supports systemInstruction
+    // and responseMimeType for structured JSON output.
+    { apiVersion: 'v1beta' },
   );
 
   let result;
