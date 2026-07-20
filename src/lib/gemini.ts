@@ -4,67 +4,80 @@ import { ALGORITHM_CATALOG } from './algorithmCatalog';
 import { getEffectiveApiKey } from './apiKeyStore';
 import type { AiPresetResponse, ChainEntry } from './presetBuilder';
 import { HARDWARE_SLOTS, findCadeiaIndexForSlot } from './hardwareSlots';
+import algData from '../data/alg_data.json';
 
 const MODEL_NAME = 'gemini-3.1-flash-lite';
 
-// Map the AI's short module codes (DRV, DLY, RVB, …) to the canonical slot
-// types used by the UI's signal-chain renderer.
-const MODULE_CODE_TO_TYPE: Record<string, string> = {
-  DYN: 'DYN',
-  FREQ: 'FREQ',
-  WAH: 'WAH',
-  DRV: 'DRIVE',
-  DRIVE: 'DRIVE',
-  OD: 'DRIVE',
-  DIST: 'DRIVE',
-  AMP: 'AMP',
-  AMPLIFIER: 'AMP',
-  CAB: 'CAB',
-  CABINET: 'CAB',
-  IR: 'IR',
-  EQ: 'EQ',
-  EQUALIZER: 'EQ',
-  MOD: 'MOD',
-  MODULATION: 'MOD',
-  CHORUS: 'MOD',
-  FLANGER: 'MOD',
-  PHASER: 'MOD',
-  TREMOLO: 'MOD',
-  DLY: 'DELAY',
-  DELAY: 'DELAY',
-  RVB: 'REVERB',
-  REVERB: 'REVERB',
-  VOL: 'VOLUME',
-  VOLUME: 'VOLUME',
-};
+type AlgWidget = { name: string };
+type AlgEntry = { fxid: number; fxtitle: string; name?: string; widget?: AlgWidget[] };
+type AlgModule = { name: string; alg: AlgEntry[] };
 
-function buildSystemPrompt(algorithms: Algorithm[]): string {
-  // Group algorithms by module so the model sees the fxTitle vocabulary it is
-  // allowed to draw from, without being flooded with internal fxids.
-  const byModule = new Map<string, string[]>();
+const ALG_MODULES: AlgModule[] = (algData as { Modules: AlgModule[] }).Modules;
+
+interface SlimEffect {
+  fxid: number | string;
+  fxTitle: string;
+  parametros: string[];
+}
+interface SlimModule {
+  modulo: string;
+  efeitos: SlimEffect[];
+}
+
+// Compact catalog built straight from alg_data.json: every effect with its
+// module code, fxid, exact fxTitle (the string presetBuilder resolves), and
+// the ordered list of parameter names — so the AI cannot hallucinate names or
+// knob counts. We drop the Chinese prose / origin / mark fields (the bulk of
+// the 850KB file) to stay well within the model context window.
+function slimFromAlgData(): SlimModule[] {
+  return ALG_MODULES.map((mod) => ({
+    modulo: mod.name,
+    efeitos: (mod.alg ?? []).map((alg) => ({
+      fxid: alg.fxid,
+      fxTitle: alg.fxtitle,
+      parametros: (alg.widget ?? []).map((w) => w.name),
+    })),
+  }));
+}
+
+// Same compact shape, but sourced from the effective Algorithm[] set — used
+// when the user uploaded a custom alg_data.json via Settings, so the AI draws
+// from that catalog instead of the bundled one.
+function slimFromAlgorithms(algorithms: Algorithm[]): SlimModule[] {
+  const byModule = new Map<string, SlimEffect[]>();
   for (const a of algorithms) {
     const key = a.type.toUpperCase();
     if (!byModule.has(key)) byModule.set(key, []);
-    byModule.get(key)!.push(a.fxTitle);
+    byModule.get(key)!.push({
+      fxid: a.fxId,
+      fxTitle: a.fxTitle,
+      parametros: a.params.map((p) => p.name),
+    });
   }
-  const catalog = Array.from(byModule.entries())
-    .map(([mod, titles]) => `  ${mod}: ${titles.map((t) => `"${t}"`).join(', ')}`)
-    .join('\n');
+  return Array.from(byModule.entries()).map(([modulo, efeitos]) => ({ modulo, efeitos }));
+}
+
+function buildSystemPrompt(algorithms: Algorithm[]): string {
+  const slim = algorithms.length > 0 ? slimFromAlgorithms(algorithms) : slimFromAlgData();
+  const catalogJson = JSON.stringify(slim);
+  const totalEffects = slim.reduce((sum, mod) => sum + mod.efeitos.length, 0);
 
   return `Você é um produtor musical e engenheiro de guitarra especialista na pedaleira Matribox II Pro (hardware QME-200). O usuário descreve um timbre em linguagem natural (ex: "Timbre para solo do Pink Floyd") e você monta a cadeia de sinal escolhendo pedais, amplificadores e gabinetes reais do catálogo oficial abaixo.
 
-CATÁLOGO OFICIAL DE ALGORITMOS (${algorithms.length} efeitos — use SOMENTE estes fxTitles):
-${catalog}
+Você DEVE escolher os nomes dos efeitos e os módulos baseando-se estritamente neste catálogo oficial anexado aqui: ${catalogJson}. Não invente nenhum nome ou módulo fora desta lista.
+
+CATÁLOGO OFICIAL DE ALGORITMOS (${totalEffects} efeitos — o JSON anexado acima é a fonte única da verdade):
+- Cada objeto tem "modulo" (DYN, FREQ, WAH, DRV, AMP, CAB, MOD, DLY, RVB, VOL), "fxid", "fxTitle" (o nome exato que você deve devolver em "nomeEfeito") e "parametros" (lista dos nomes dos knobs, em ordem).
 
 REGRAS RÍGIDAS:
 1. Responda com UM único objeto JSON válido. Sem markdown, sem comentários, sem code fences, sem texto fora do JSON.
-2. Use SOMENTE fxTitles que existem no catálogo acima. Nunca invente nomes de efeitos.
+2. Use SOMENTE fxTitle que existem no catálogo anexado. Nunca invente nomes de efeitos. O campo "nomeEfeito" deve ser o fxTitle exato (cópia idêntica, incluindo espaços e maiúsculas/minúsculas).
 3. O campo "nomePatch" deve ter no MÁXIMO 12 caracteres alfanuméricos (sem espaços, sem acentos, sem símbolos).
 4. O campo "comentario" deve explicar em português quais pedais/amp/cab foram escolhidos e por que combinam com o pedido.
-5. O campo "cadeia" é um array de módulos ativos na ordem do sinal. Cada módulo tem "modulo" (código curto: DRV, AMP, CAB, EQ, MOD, DLY, RVB, VOL, DYN, WAH, FREQ), "nomeEfeito" (fxTitle exato do catálogo) e "knobs" (array de números inteiros de 0 a 100, um por parâmetro do efeito).
+5. O campo "cadeia" é um array de módulos ativos na ordem do sinal. Cada módulo tem "modulo" (código curto presente no catálogo), "nomeEfeito" (fxTitle exato do catálogo) e "knobs" (array de números inteiros de 0 a 100, um por parâmetro listado em "parametros", na mesma ordem).
 6. É OBRIGATÓRIO incluir exatamente UM módulo AMP e UM módulo CAB na cadeia, ambos do catálogo. O gabinete deve ser o par natural do amplificador escolhido.
-7. Inclua um módulo VOL final com o algoritmo "Volume" do catálogo. Seu knob é o volume master (0–100): timbres de alto ganho → 55–75; crunch médio → 72–85; limpo/boutique → 85–100.
-8. O número de knobs de cada efeito deve corresponder à quantidade de parâmetros do algoritmo no catálogo. Se não souber, use 3 valores padrão (50, 50, 50).
+7. Inclua um módulo VOL final com o fxTitle "Volume" do catálogo. Seu knob é o volume master (0–100): timbres de alto ganho → 55–75; crunch médio → 72–85; limpo/boutique → 85–100.
+8. O número e a ordem dos knobs de cada efeito DEVEM corresponder exatamente à lista "parametros" do fxTitle no catálogo anexado. Um valor 0–100 para cada parâmetro, na mesma ordem. Nunca use valores padrão genéricos.
 9. Proibido gerar arrays numéricos longos, bytes, hex ou Base64 por conta própria. Apenas os knobs 0–100 de cada efeito.
 10. FIDELIDADE AO PROMPT: o nomePatch e o comentario DEVEM refletir o gênero/artista solicitado. O amp + cab + drive DEVEM ser apropriados ao gênero (ex: Metalcore → amp de alto ganho + cab 4x12 + distorção pesada). Nunca substitua por outro gênero.
 
@@ -81,7 +94,7 @@ FORMATO DE RESPOSTA (JSON estrito):
 REGRAS DOS CAMPOS:
 - "nomePatch": string alfanumérica, máximo 12 caracteres.
 - "comentario": string em português.
-- "cadeia": array de objetos com "modulo" (string), "nomeEfeito" (string exata do catálogo), "knobs" (array de números 0–100).
+- "cadeia": array de objetos com "modulo" (string do catálogo), "nomeEfeito" (fxTitle exato do catálogo), "knobs" (array de números 0–100, um por item de "parametros").
 - Sem campos extras, sem markdown.`;
 }
 
