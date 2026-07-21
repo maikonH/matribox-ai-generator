@@ -262,7 +262,7 @@ export default function SettingsDrawer({
                           className="px-3 py-2 flex items-center justify-between gap-2"
                         >
                           <span className="text-xs text-slate-400 truncate">
-                            {alg.fxTitle}
+                            {alg.name}
                           </span>
                           <span className="text-[10px] font-mono text-slate-600 shrink-0">
                             {alg.fxId}

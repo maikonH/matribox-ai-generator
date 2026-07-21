@@ -9,7 +9,10 @@ export interface AlgorithmParam {
 
 export interface Algorithm {
   fxId: string;
+  /** Commercial/AI-facing name from alg_data.json `fxtitle`. Used internally by Gemini only, never shown in the UI. */
   fxTitle: string;
+  /** Official name shown by the Matribox II Pro and its editor, from alg_data.json `name`. This is what the UI displays. */
+  name: string;
   type: string;
   subType?: string;
   category?: string;
@@ -25,7 +28,10 @@ export interface AlgorithmCategory {
 
 export interface PresetModule {
   fxId: string;
+  /** Internal AI-facing name (alg_data.json `fxtitle`). Kept for reference only; the UI renders `name`. */
   fxTitle: string;
+  /** Official name shown by the Matribox II Pro and its editor. This is what the UI displays. */
+  name: string;
   type: string;
   subType: string;
   enabled?: boolean;

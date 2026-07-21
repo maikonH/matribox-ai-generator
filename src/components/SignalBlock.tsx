@@ -52,7 +52,7 @@ function resolveModuleIcon(module: PresetModule): string | undefined {
   const key = module.type.toUpperCase().trim();
   const direct = moduleImageMap[key];
   if (direct) return direct;
-  const hay = `${module.type} ${module.fxTitle}`.toUpperCase().trim();
+  const hay = `${module.type} ${module.name}`.toUpperCase().trim();
   if (hay.includes('VOLUME') || hay.includes('VOL')) return imgVol;
   if (
     hay.includes('MOD') ||
@@ -95,7 +95,7 @@ export default function SignalBlock({ module, index, onParamChange }: Props) {
             <Layers className="w-4 h-4" />
           </span>
         )}
-        <span className="text-white text-sm font-medium truncate flex-1">{module.fxTitle}</span>
+        <span className="text-white text-sm font-medium truncate flex-1">{module.name}</span>
         {expanded ? (
           <ChevronDown className="w-4 h-4 text-slate-500 shrink-0" />
         ) : (

@@ -79,7 +79,11 @@ function buildCatalog(): Algorithm[] {
     for (const entry of mod.alg ?? []) {
       out.push({
         fxId: String(entry.fxid),
+        // fxTitle: commercial/AI-facing name — Gemini only. name: the official
+        // label the Matribox II Pro and its editor display, and what this app
+        // shows everywhere in the UI. alg_data.json always carries both.
         fxTitle: entry.fxtitle || entry.name || `Algorithm ${entry.fxid}`,
+        name: entry.name || entry.fxtitle || `Algorithm ${entry.fxid}`,
         type,
         subType: type,
         category: MODULE_DISPLAY[type] ?? type,

@@ -78,6 +78,9 @@ function normalizeAlgorithm(raw: RawAlgorithm): Algorithm | null {
   return {
     fxId: fxId || fxTitle.toLowerCase().replace(/\s+/g, '_'),
     fxTitle: fxTitle || `Algorithm ${fxId}`,
+    // `name` is the official display name; fall back to fxTitle if the dev
+    // overlay file omits it so the UI always has something to show.
+    name: asString(raw.name, fxTitle || `Algorithm ${fxId}`),
     type: raw._moduleType ? asString(raw._moduleType, 'unknown') : asString(raw.type, 'unknown'),
     subType: asString(raw.subType, raw.subtype ?? raw.type ?? ''),
     category: raw.category ? asString(raw.category) : undefined,

@@ -197,6 +197,7 @@ export function aiResponseToPreset(ai: AiPresetResponse, catalog: Algorithm[]): 
     modules.push({
       fxId: alg.fxId,
       fxTitle: alg.fxTitle,
+      name: alg.name,
       type: slot.uiType,
       subType: slot.uiType,
       enabled: true,
