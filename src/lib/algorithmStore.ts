@@ -1,5 +1,5 @@
 import type { Algorithm, AlgorithmCategory } from './types';
-import { ALGORITHM_CATALOG, getCatalog } from './algorithmCatalog';
+import { getCatalog } from './algorithmCatalog';
 
 // Single source of truth: src/data/alg_data.json, projected at module load via
 // ALGORITHM_CATALOG. A developer may override the catalog IN MEMORY ONLY from
@@ -24,10 +24,6 @@ export function setDevOverlay(algorithms: Algorithm[] | null): void {
 
 export function isOverlayActive(): boolean {
   return overlay !== null;
-}
-
-export function getCatalogAlgorithms(): Algorithm[] {
-  return ALGORITHM_CATALOG;
 }
 
 export function getCategorized(algorithms: Algorithm[]): AlgorithmCategory[] {

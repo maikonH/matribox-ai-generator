@@ -99,3 +99,30 @@ export const ALGORITHM_COUNT = ALGORITHM_CATALOG.length;
 export function getCatalog(): Algorithm[] {
   return ALGORITHM_CATALOG;
 }
+
+// fxTitle → fxid and name → fxid lookups, built once from the same raw
+// alg_data.json the catalog projects. The AI is prompted with fxTitles, but
+// it sometimes returns the internal `name` instead, so resolving against both
+// prevents a silently dropped effect. This is the single resolver every
+// consumer (presetBuilder, gemini) must use — no other module builds these
+// maps.
+const FX_TITLE_TO_ID = new Map<string, number>();
+const FX_NAME_TO_ID = new Map<string, number>();
+{
+  const modules = (algData as { Modules: AlgModule[] }).Modules;
+  for (const mod of modules) {
+    for (const alg of mod.alg ?? []) {
+      if (alg.fxtitle) FX_TITLE_TO_ID.set(alg.fxtitle.toLowerCase(), alg.fxid);
+      if (alg.name) FX_NAME_TO_ID.set(alg.name.toLowerCase(), alg.fxid);
+    }
+  }
+}
+
+/** Resolve the numeric fxid for an effect name, matching fxTitle first, then name. */
+export function resolveFxId(nomeEfeito: string): number | undefined {
+  const key = (nomeEfeito || '').toLowerCase().trim();
+  if (!key) return undefined;
+  const byTitle = FX_TITLE_TO_ID.get(key);
+  if (byTitle !== undefined) return byTitle;
+  return FX_NAME_TO_ID.get(key);
+}

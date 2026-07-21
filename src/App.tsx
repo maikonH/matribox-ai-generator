@@ -28,7 +28,7 @@ export default function App() {
         .then((ai) => {
           aiResponseRef.current = ai;
           setBuiltPreset(buildPresetFile(ai));
-          setPreset(aiResponseToPreset(ai));
+          setPreset(aiResponseToPreset(ai, algorithms));
           showToast(`Preset "${ai.nomePatch}" gerado com sucesso!`, 'success');
         })
         .catch((e: Error) => showToast(e.message, 'error'))

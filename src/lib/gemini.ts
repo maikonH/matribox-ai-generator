@@ -179,8 +179,8 @@ export function validateAiResponse(ai: AiPresetResponse, catalog: Algorithm[]): 
  * exactly this list and nothing else. The 10-slot padding with zeroed bypass
  * blocks happens exclusively inside buildPresetFile, never here.
  */
-export function aiResponseToPreset(ai: AiPresetResponse): GeneratedPreset {
-  const byTitle = new Map(ALGORITHM_CATALOG.map((a) => [normalizeForCompare(a.fxTitle), a]));
+export function aiResponseToPreset(ai: AiPresetResponse, catalog: Algorithm[]): GeneratedPreset {
+  const byTitle = new Map(catalog.map((a) => [normalizeForCompare(a.fxTitle), a]));
   const modules: PresetModule[] = [];
   for (const entry of ai.cadeia) {
     const slot = findSlotForCode(entry.modulo);

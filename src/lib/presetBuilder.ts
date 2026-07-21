@@ -5,31 +5,8 @@
 // hardware position), and a fixed footer. Each slot is always present — an
 // inactive slot is written as a zeroed block so following slots stay aligned.
 
-import algData from '../data/alg_data.json';
 import { HARDWARE_SLOTS, findCadeiaIndexForSlot } from './hardwareSlots';
-
-type AlgEntry = {
-  fxid: number;
-  fxtitle: string;
-  name?: string;
-  widget?: { name: string }[];
-};
-
-type AlgModule = { name: string; alg: AlgEntry[] };
-
-const MODULES: AlgModule[] = (algData as { Modules: AlgModule[] }).Modules;
-
-// fxTitle → fxid and name → fxid lookups. The AI is prompted with fxTitles,
-// but it sometimes returns the internal `name` instead, so resolving against
-// both prevents a silently dropped effect.
-const FX_TITLE_TO_ID = new Map<string, number>();
-const FX_NAME_TO_ID = new Map<string, number>();
-for (const mod of MODULES) {
-  for (const alg of mod.alg) {
-    FX_TITLE_TO_ID.set((alg.fxtitle || '').toLowerCase(), alg.fxid);
-    if (alg.name) FX_NAME_TO_ID.set(alg.name.toLowerCase(), alg.fxid);
-  }
-}
+import { resolveFxId } from './algorithmCatalog';
 
 // Status byte 0 (OFF) + 4 zeroed fxid bytes. Knobs are omitted because the
 // hardware reads the 0 status and skips to the next slot.
@@ -87,15 +64,6 @@ function bytesToBase64(bytes: number[]): string {
     base64 += btoa(bin.slice(i, i + chunkSize));
   }
   return base64;
-}
-
-/** Resolve the fxid for an effect name, matching fxTitle first, then name. */
-export function resolveFxId(nomeEfeito: string): number | undefined {
-  const key = (nomeEfeito || '').toLowerCase().trim();
-  if (!key) return undefined;
-  const byTitle = FX_TITLE_TO_ID.get(key);
-  if (byTitle !== undefined) return byTitle;
-  return FX_NAME_TO_ID.get(key);
 }
 
 /**
