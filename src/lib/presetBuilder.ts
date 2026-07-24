@@ -49,16 +49,24 @@ function lcgNextKey(stateRef: { v: number }): number {
 /**
  * Selective XOR: the first XOR_SKIP_BYTES are left as plain-text, then the
  * next ENCRYPTED_SIZE bytes are XOR-ciphered with the LCG stream.
+ *
+ * The LCG state is advanced XOR_SKIP_BYTES times before ciphering begins so
+ * that the generator stays in sync with the firmware's decodefunc, which runs
+ * the full LCG stream from byte 0 but XORs only from byte 32 onward.
  */
 function cipherPayload(data: Uint8Array, seed: number): Uint8Array {
   const out = new Uint8Array(data.length);
-  // Plain-text prefix
+  const state = { v: seed >>> 0 };
+
+  // Plain-text prefix — advance LCG state to keep stream in sync with firmware
   const plainEnd = Math.min(XOR_SKIP_BYTES, data.length);
-  for (let i = 0; i < plainEnd; i++) out[i] = data[i];
+  for (let i = 0; i < plainEnd; i++) {
+    lcgNextKey(state); // consume key without XOR
+    out[i] = data[i];
+  }
 
   // Ciphered section
   const cipherEnd = Math.min(plainEnd + ENCRYPTED_SIZE, data.length);
-  const state = { v: seed >>> 0 };
   for (let i = plainEnd; i < cipherEnd; i++) {
     out[i] = data[i] ^ lcgNextKey(state);
   }
