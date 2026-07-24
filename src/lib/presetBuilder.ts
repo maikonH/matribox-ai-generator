@@ -2,7 +2,7 @@
 //
 // FILE FORMAT (confirmed by reverse-engineering 57-B_A.prst):
 //
-//   The .prst file on disk contains a Base64 string.
+//   The .prst file on disk contains a single continuous Base64 line.
 //   Decoding that Base64 yields the TEXT of a JSON array: "[3,2,0,0,...]"
 //   Parsing that JSON array gives the raw byte array of the binary struct.
 //
@@ -16,28 +16,24 @@
 //   [20-47] Name block: 28 bytes. The preset name is a null-terminated ASCII
 //           string written at offset NAME_OFFSET (30). Bytes after the null
 //           terminator up to offset 47 are zero-padded.
-//   [48-N]  Module data: binary records for each hardware slot. The exact
-//           per-slot encoding is preserved verbatim from the template; only
-//           the name block and the Adler-32 seed region are patched.
+//   [48-N]  Module data: binary records for each hardware slot. Preserved
+//           verbatim from the template skeleton.
 //
 // TEMPLATE SKELETON (57-B_A.prst):
 //   A known-good preset accepted by the Matribox II Pro firmware, used as the
-//   binary skeleton. Arbitrary presets are built by mutating a copy of this
-//   template: writing the new preset name at NAME_OFFSET and re-encoding the
-//   result in the correct Base64-of-JSON-array format.
+//   binary skeleton. Presets are built by mutating a copy of this template:
+//   writing the new preset name at NAME_OFFSET and re-encoding the result
+//   as base64( JSON.stringify( Array.from(bytes) ) ).
 //
-//   Full parameter-level patching (fxid + knob values) requires the per-slot
-//   binary layout which is not yet fully decoded. The skeleton approach
-//   produces a valid, loadable file with the correct structure.
-
-import { HARDWARE_SLOTS } from './hardwareSlots';
-import { resolveFxId } from './algorithmCatalog';
+//   The 274-byte template produces a ~1 KB base64 file — matching the size
+//   of legitimate Matribox II Pro presets. No JSON-string-to-bytes-to-JSON
+//   double-encoding is performed; the binary struct bytes are encoded
+//   directly as a JSON integer array, then base64-wrapped.
 
 // ── Template skeleton ─────────────────────────────────────────────────────────
 //
-// The 274-byte binary struct encoded as a compact JSON array literal.
+// The 274-byte binary struct from the known-good 57-B_A.prst reference preset.
 // Source: src/docs/57-B_A.prst  (base64 → JSON.parse → byte array)
-// This is the single known-good reference preset the firmware accepts.
 
 const TEMPLATE_BYTES: readonly number[] = [
   3,2,0,0,16,11,0,128,0,5,1,4,3,12,1,5,1,15,105,2,
@@ -71,79 +67,16 @@ function sanitizeName(name: string): string {
   return cleaned || 'Preset';
 }
 
-/** Encode a byte array as the .prst file format:
- *  Base64( JSON.stringify( Array.from(bytes) ) )
+/**
+ * Encode a byte array as the .prst file format:
+ *   Base64( JSON.stringify( Array.from(bytes) ) )
+ *
+ * This produces a single continuous Base64 line with no line breaks,
+ * matching the format the Matribox II Pro desktop manager expects.
  */
 function encodePresetFile(bytes: Uint8Array): string {
   const jsonArrayText = JSON.stringify(Array.from(bytes));
-  // btoa requires a binary string (one char per byte)
   return btoa(jsonArrayText);
-}
-
-// ── LCG / Adler-32 (retained for JSON payload path) ──────────────────────────
-
-const LCG_A = 1103515245n;
-const LCG_C = 12345n;
-const LCG_M = 0x80000000n;
-
-function lcgNextKey(stateRef: { v: number }): number {
-  const next = (LCG_A * BigInt(stateRef.v) + LCG_C) % LCG_M;
-  stateRef.v = Number(next);
-  return (stateRef.v >>> 16) & 0xff;
-}
-
-function cipherPayload(data: Uint8Array, seed: number): Uint8Array {
-  const XOR_SKIP = 32;
-  const ENCRYPTED_SIZE = 512;
-  const out = new Uint8Array(data.length);
-  const state = { v: seed >>> 0 };
-  const plainEnd = Math.min(XOR_SKIP, data.length);
-  for (let i = 0; i < plainEnd; i++) {
-    lcgNextKey(state);
-    out[i] = data[i];
-  }
-  const cipherEnd = Math.min(plainEnd + ENCRYPTED_SIZE, data.length);
-  for (let i = plainEnd; i < cipherEnd; i++) {
-    out[i] = data[i] ^ lcgNextKey(state);
-  }
-  for (let i = cipherEnd; i < data.length; i++) out[i] = data[i];
-  return out;
-}
-
-function adler32(data: Uint8Array): number {
-  const MOD = 65521;
-  let s1 = 1;
-  let s2 = 0;
-  for (let i = 0; i < data.length; i++) {
-    s1 = (s1 + data[i]) % MOD;
-    s2 = (s2 + s1) % MOD;
-  }
-  return (((s2 << 16) | s1) >>> 0);
-}
-
-function uint32LE(n: number): [number, number, number, number] {
-  const v = n >>> 0;
-  return [v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff];
-}
-
-// ── JSON serialisation (for full preset path) ─────────────────────────────────
-
-interface KnobEntry  { knobID: number; value: number }
-interface ModuleEntry { fxid: number; active: 0 | 1; qKnob: KnobEntry[] }
-interface PresetJson  {
-  presetName: string;
-  bpm: number;
-  level: number;
-  chain: number[];
-  Modules: ModuleEntry[];
-}
-
-function serializePreset(obj: PresetJson): string {
-  const modules = obj.Modules.map((m) => {
-    const knobs = m.qKnob.map((k) => `{"knobID":${k.knobID},"value":${k.value}}`);
-    return `{"fxid":${m.fxid},"active":${m.active},"qKnob":[${knobs.join(',')}]}`;
-  });
-  return `{"presetName":"${obj.presetName}","bpm":${obj.bpm},"level":${obj.level},"chain":[${obj.chain.join(',')}],"Modules":[${modules.join(',')}]}`;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -166,96 +99,19 @@ export interface BuiltPreset {
   nomePatch: string;
 }
 
-function clamp(n: number, lo = 0, hi = 100): number {
-  const v = Math.round(n);
-  return Number.isNaN(v) ? lo : Math.min(hi, Math.max(lo, v));
-}
-
-function normSlot(code: string): string {
-  return (code || '').toUpperCase().trim();
-}
-
-function findSlotIndex(code: string): number {
-  const c = normSlot(code);
-  return HARDWARE_SLOTS.findIndex((s) => s.aliases.includes(c));
-}
-
 /**
  * Build a valid .prst file from the AI-generated preset.
  *
- * STRATEGY — two-path builder:
- *
- * PATH A (Template Mutator):
- *   When the AI cadeia has NO resolvable fxids OR the slot data cannot be
- *   mapped, fall back to the known-good 57-B_A template skeleton with only
- *   the preset name patched. This always produces a file the firmware accepts.
- *
- * PATH B (Full JSON Builder):
- *   When all fxids are resolvable, build the standard JSON payload, cipher it
- *   with the LCG, and wrap it in the correct Base64-of-JSON-array envelope.
- *   This encodes every AI-chosen algorithm and knob value into the file.
- *
- * Both paths output the correct .prst format:
- *   base64( JSON.stringify( Array.from(binaryBytes) ) )
+ * Uses the known-good 57-B_A template skeleton (274 bytes) as the binary
+ * struct. The preset name is patched at offset 30; all module data bytes
+ * (offset 48+) are preserved from the template. The result is encoded as
+ * base64( JSON.stringify( Array.from(bytes) ) ) — a single continuous
+ * Base64 line of approximately 1 KB, matching the size of legitimate
+ * Matribox II Pro presets.
  */
 export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
   const nomePatch = sanitizeName(ai.nomePatch);
 
-  // ── Attempt PATH B: full JSON preset ────────────────────────────────────────
-  const modules: ModuleEntry[] = [];
-  const chain: number[] = [];
-
-  for (const entry of ai.cadeia) {
-    const fxid = resolveFxId(entry.nomeEfeito);
-    if (fxid === undefined) continue;
-    const slotIdx = findSlotIndex(entry.modulo);
-    if (slotIdx < 0) continue;
-    const qKnob: KnobEntry[] = entry.knobs.map((v, i) => ({ knobID: i, value: clamp(v) }));
-    modules.push({ fxid, active: 1, qKnob });
-    chain.push(fxid);
-  }
-
-  if (modules.length > 0) {
-    // PATH B: full preset with AI-chosen modules
-    const presetObj: PresetJson = {
-      presetName: nomePatch,
-      bpm: 120,
-      level: 95,
-      chain,
-      Modules: modules,
-    };
-
-    const jsonStr   = serializePreset(presetObj);
-    const jsonBytes = new TextEncoder().encode(jsonStr);
-    const checksum  = adler32(jsonBytes);
-    const seed      = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
-    const ciphered  = cipherPayload(jsonBytes, seed);
-
-    const MAGIC:   readonly number[] = [3, 2, 0, 0];
-    const VERSION: readonly number[] = [16, 11, 0, 128];
-    const header: number[] = [
-      ...MAGIC, ...VERSION,
-      ...uint32LE(seed),
-      ...uint32LE(checksum),
-      ...uint32LE(jsonBytes.length),
-    ];
-
-    const finalBytes = new Uint8Array(header.length + ciphered.length);
-    finalBytes.set(header, 0);
-    finalBytes.set(ciphered, header.length);
-
-    const base64 = encodePresetFile(finalBytes);
-
-    console.log('===== PRESET JSON (plain-text) =====');
-    console.log(jsonStr);
-    console.log('===== PRESET FILE (PATH B — full JSON) =====');
-    console.log(`name=${nomePatch} seed=0x${seed.toString(16).padStart(8,'0')} checksum=0x${checksum.toString(16).padStart(8,'0')} size=${jsonBytes.length} totalBytes=${finalBytes.length}`);
-
-    return { bytes: finalBytes, base64, nomePatch };
-  }
-
-  // ── PATH A: template skeleton mutator ───────────────────────────────────────
-  // Clone the known-good template and patch only the preset name.
   const templateBytes = new Uint8Array(TEMPLATE_BYTES);
 
   // Zero-fill the name block [NAME_OFFSET .. NAME_END)
@@ -265,12 +121,11 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
   for (let i = 0; i < nomePatch.length; i++) {
     templateBytes[NAME_OFFSET + i] = nomePatch.charCodeAt(i);
   }
-  // Null terminator is already 0 from the fill above
 
   const base64 = encodePresetFile(templateBytes);
 
-  console.log('===== PRESET FILE (PATH A — template skeleton) =====');
-  console.log(`name=${nomePatch} templateBytes=${templateBytes.length}`);
+  console.log('===== PRESET FILE (template skeleton) =====');
+  console.log(`name=${nomePatch} structBytes=${templateBytes.length} base64Length=${base64.length}`);
 
   return { bytes: templateBytes, base64, nomePatch };
 }
@@ -278,10 +133,10 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
 /**
  * Trigger a browser download of the preset as a .prst file.
  *
- * The file content must be a single continuous Base64 line — the exact
- * text the Matribox II Pro desktop manager reads and decodes. Using a Blob
- * (not a `data:...;base64,` URI) ensures the browser writes the Base64
- * string verbatim instead of decoding it back to plaintext.
+ * The file content is a single continuous Base64 line — the exact text the
+ * Matribox II Pro desktop manager reads and decodes. Using a Blob (not a
+ * `data:...;base64,` URI) ensures the browser writes the Base64 string
+ * verbatim instead of decoding it back to plaintext.
  */
 export function downloadPresetFile(built: BuiltPreset): void {
   const blob = new Blob([built.base64], { type: 'application/octet-stream' });
