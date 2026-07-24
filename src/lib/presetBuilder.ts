@@ -1,27 +1,130 @@
-// Matribox II Pro (QME-200) preset file builder.
+// Matribox II Pro (.prst) preset file builder.
 //
-// The device stores presets as a flat linear byte stream: a fixed header, the
-// patch name as ASCII + a PRO signature, exactly 10 slot blocks (one per
-// hardware position), and a fixed footer. Each slot is always present — an
-// inactive slot is written as a zeroed block so following slots stay aligned.
+// Binary format (confirmed via reverse engineering of libapp.so):
+//
+//   Offset  Size  Description
+//   0- 3    4     Magic Header  [3, 2, 0, 0]
+//   4- 7    4     Version       [16, 11, 0, 128]
+//   8-11    4     Seed          (uint32 LE, generated from clock)
+//  12-15    4     Checksum      (Adler-32 over the raw JSON bytes, LE)
+//  16-19    4     Size          (JSON byte length, uint32 LE)
+//  20- N    var   Payload       (JSON bytes, first 32 plain-text, next 512 XOR/LCG)
+//
+// Pipeline (export):
+//   1. Build the JSON object in exact key order (presetName → bpm → level → chain → Modules)
+//   2. Minify the JSON string (no spaces after `:` or `,`)
+//   3. Encode to UTF-8 bytes
+//   4. Calculate Adler-32 checksum over the raw bytes
+//   5. Generate a random uint32 Seed
+//   6. Apply selective XOR/LCG: skip first 32 bytes, cipher next min(512, remaining) bytes
+//   7. Assemble: Magic + Version + Seed(LE) + Checksum(LE) + Size(LE) + CipheredPayload
+//   8. Base64-encode the entire byte array → file content
 
-import { HARDWARE_SLOTS, findCadeiaIndexForSlot } from './hardwareSlots';
+import { HARDWARE_SLOTS } from './hardwareSlots';
 import { resolveFxId } from './algorithmCatalog';
 
-// Status byte 0 (OFF) + 4 zeroed fxid bytes. Knobs are omitted because the
-// hardware reads the 0 status and skips to the next slot.
-const EMPTY_BLOCK: number[] = [0, 0, 0, 0, 0];
+// ── Constants ────────────────────────────────────────────────────────────────
 
-const HEADER_BYTES = [
-  3, 2, 0, 0, 16, 11, 0, 128, 0, 5, 1, 4, 3, 12, 1, 5, 1, 15, 105, 2, 105, 164,
-  2, 0, 2, 1,
-];
+const MAGIC:   readonly number[] = [3, 2, 0, 0];
+const VERSION: readonly number[] = [16, 11, 0, 128];
 
-const PRO_SIGNATURE = [32, 80, 82, 79];
+/** Bytes at the start of the payload left in plain-text (the `presetName` header). */
+const XOR_SKIP_BYTES = 32;
 
-const FOOTER_BYTES = [
-  16, 12, 0, 0, 0, 0, 0, 9, 1, 0, 0, 128, 63, 200, 0, 0, 48, 17, 0, 0,
-];
+/** Maximum bytes of the payload to cipher. */
+const ENCRYPTED_SIZE = 512;
+
+// ── LCG Cipher (MatriboxCrypto) ───────────────────────────────────────────────
+
+const LCG_A = 1103515245; // 0x41C64E6D
+const LCG_C = 12345;      // 0x3039
+const LCG_M = 0x80000000; // 2^31
+
+function lcgNextKey(stateRef: { v: number }): number {
+  const next = (BigInt(LCG_A) * BigInt(stateRef.v) + BigInt(LCG_C)) % BigInt(LCG_M);
+  stateRef.v = Number(next);
+  return (stateRef.v >>> 16) & 0xff;
+}
+
+/**
+ * Selective XOR: the first XOR_SKIP_BYTES are left as plain-text, then the
+ * next ENCRYPTED_SIZE bytes are XOR-ciphered with the LCG stream.
+ */
+function cipherPayload(data: Uint8Array, seed: number): Uint8Array {
+  const out = new Uint8Array(data.length);
+  // Plain-text prefix
+  const plainEnd = Math.min(XOR_SKIP_BYTES, data.length);
+  for (let i = 0; i < plainEnd; i++) out[i] = data[i];
+
+  // Ciphered section
+  const cipherEnd = Math.min(plainEnd + ENCRYPTED_SIZE, data.length);
+  const state = { v: seed >>> 0 };
+  for (let i = plainEnd; i < cipherEnd; i++) {
+    out[i] = data[i] ^ lcgNextKey(state);
+  }
+
+  // Remainder plain-text (if JSON > 32 + 512 bytes)
+  for (let i = cipherEnd; i < data.length; i++) out[i] = data[i];
+
+  return out;
+}
+
+// ── Adler-32 Checksum ─────────────────────────────────────────────────────────
+
+function adler32(data: Uint8Array): number {
+  const MOD = 65521;
+  let s1 = 1;
+  let s2 = 0;
+  for (let i = 0; i < data.length; i++) {
+    s1 = (s1 + data[i]) % MOD;
+    s2 = (s2 + s1) % MOD;
+  }
+  return (((s2 << 16) | s1) >>> 0);
+}
+
+// ── uint32 little-endian helpers ──────────────────────────────────────────────
+
+function uint32LE(n: number): [number, number, number, number] {
+  const v = n >>> 0;
+  return [v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff];
+}
+
+// ── Base64 ───────────────────────────────────────────────────────────────────
+
+function toBase64(bytes: Uint8Array): string {
+  let bin = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(bin);
+}
+
+// ── JSON serialisation (strict key order) ─────────────────────────────────────
+
+interface KnobEntry  { knobID: number; value: number }
+interface ModuleEntry { fxid: number; active: 0 | 1; qKnob: KnobEntry[] }
+interface PresetJson  {
+  presetName: string;
+  bpm: number;
+  level: number;
+  chain: number[];
+  Modules: ModuleEntry[];
+}
+
+/**
+ * Serialise the preset JSON in the exact key order the Dart engine uses.
+ * Produces compact JSON (no spaces) with integer active fields (0/1).
+ */
+function serializePreset(obj: PresetJson): string {
+  const modules = obj.Modules.map((m) => {
+    const knobs = m.qKnob.map((k) => `{"knobID":${k.knobID},"value":${k.value}}`);
+    return `{"fxid":${m.fxid},"active":${m.active},"qKnob":[${knobs.join(',')}]}`;
+  });
+  return `{"presetName":"${obj.presetName}","bpm":${obj.bpm},"level":${obj.level},"chain":[${obj.chain.join(',')}],"Modules":[${modules.join(',')}]}`;
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
 
 export interface ChainEntry {
   modulo: string;
@@ -36,19 +139,14 @@ export interface AiPresetResponse {
 }
 
 export interface BuiltPreset {
-  bytes: number[];
+  bytes: Uint8Array;
   base64: string;
   nomePatch: string;
 }
 
-function clampByte(n: number): number {
+function clamp(n: number, lo = 0, hi = 100): number {
   const v = Math.round(n);
-  if (Number.isNaN(v)) return 0;
-  return Math.min(255, Math.max(0, v));
-}
-
-function fxidToBytes(fxid: number): [number, number, number, number] {
-  return [fxid & 0xff, (fxid >>> 8) & 0xff, (fxid >>> 16) & 0xff, (fxid >>> 24) & 0xff];
+  return Number.isNaN(v) ? lo : Math.min(hi, Math.max(lo, v));
 }
 
 function sanitizeName(name: string): string {
@@ -56,65 +154,96 @@ function sanitizeName(name: string): string {
   return cleaned || 'Preset';
 }
 
-function bytesToBase64(bytes: number[]): string {
-  const bin = String.fromCharCode(...bytes.map((b) => clampByte(b)));
-  let base64 = '';
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bin.length; i += chunkSize) {
-    base64 += btoa(bin.slice(i, i + chunkSize));
-  }
-  return base64;
+function normSlot(code: string): string {
+  return (code || '').toUpperCase().trim();
+}
+
+function findSlotIndex(code: string): number {
+  const c = normSlot(code);
+  return HARDWARE_SLOTS.findIndex((s) => s.aliases.includes(c));
 }
 
 /**
- * Build the full byte stream for a Matribox II Pro preset. Iterates the 10
- * hardware slots in fixed order; each active slot emits [1, fxidLE...,
- * knobs...], each inactive slot emits the zeroed block.
+ * Build a valid .prst file from the AI-generated preset.
+ *
+ * Slots not present in the AI cadeia are omitted from the JSON (the device
+ * identifies active modules via the `chain` array, not positional padding).
  */
 export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
   const nomePatch = sanitizeName(ai.nomePatch);
-  const bytes: number[] = [];
+  const modules: ModuleEntry[] = [];
+  const chain: number[] = [];
 
-  bytes.push(...HEADER_BYTES);
+  for (const entry of ai.cadeia) {
+    const fxid = resolveFxId(entry.nomeEfeito);
+    if (fxid === undefined) continue;
 
-  for (let i = 0; i < nomePatch.length; i++) {
-    bytes.push(clampByte(nomePatch.charCodeAt(i)));
-  }
-  bytes.push(0); // null terminator
-  bytes.push(...PRO_SIGNATURE);
+    const slotIdx = findSlotIndex(entry.modulo);
+    if (slotIdx < 0) continue;
 
-  const cadeia = ai.cadeia || [];
-  for (let slotIndex = 0; slotIndex < HARDWARE_SLOTS.length; slotIndex++) {
-    const entryIndex = findCadeiaIndexForSlot(cadeia, slotIndex);
-    const entry = entryIndex >= 0 ? cadeia[entryIndex] : undefined;
-    const fxid = entry ? resolveFxId(entry.nomeEfeito) : undefined;
+    const qKnob: KnobEntry[] = entry.knobs.map((v, i) => ({
+      knobID: i,
+      value: clamp(v),
+    }));
 
-    if (!entry || fxid === undefined) {
-      bytes.push(...EMPTY_BLOCK);
-      continue;
-    }
-
-    bytes.push(1); // status ON
-    bytes.push(...fxidToBytes(fxid));
-    for (const knob of entry.knobs || []) {
-      bytes.push(clampByte(knob));
-    }
+    modules.push({ fxid, active: 1, qKnob });
+    chain.push(fxid);
   }
 
-  bytes.push(...FOOTER_BYTES);
+  const presetObj: PresetJson = {
+    presetName: nomePatch,
+    bpm: 120,
+    level: 95,
+    chain,
+    Modules: modules,
+  };
 
-  return { bytes, base64: bytesToBase64(bytes), nomePatch };
+  const jsonStr  = serializePreset(presetObj);
+  const jsonBytes = new TextEncoder().encode(jsonStr);
+
+  // Checksum is calculated over the original (un-ciphered) JSON bytes
+  const checksum = adler32(jsonBytes);
+
+  // Random seed generated from current clock (matches firmware behaviour)
+  const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+
+  const ciphered = cipherPayload(jsonBytes, seed);
+
+  const header: number[] = [
+    ...MAGIC,
+    ...VERSION,
+    ...uint32LE(seed),
+    ...uint32LE(checksum),
+    ...uint32LE(jsonBytes.length),
+  ];
+
+  const finalBytes = new Uint8Array(header.length + ciphered.length);
+  finalBytes.set(header, 0);
+  finalBytes.set(ciphered, header.length);
+
+  const result: BuiltPreset = {
+    bytes: finalBytes,
+    base64: toBase64(finalBytes),
+    nomePatch,
+  };
+
+  console.log('===== PRESET JSON (plain-text) =====');
+  console.log(jsonStr);
+  console.log('===== PRESET FILE =====');
+  console.log(`seed=0x${seed.toString(16).padStart(8,'0')} checksum=0x${checksum.toString(16).padStart(8,'0')} size=${jsonBytes.length} totalBytes=${finalBytes.length}`);
+
+  return result;
 }
 
 /**
- * Trigger a browser download of the preset as a .prst file. The pedal editor
- * expects plain text whose sole contents are the Base64-encoded byte stream.
+ * Trigger a browser download of the preset as a .prst file.
+ * The pedal editor expects the file to contain the raw Base64 string.
  */
 export function downloadPresetFile(built: BuiltPreset): void {
   const blob = new Blob([built.base64], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
   a.download = `${built.nomePatch || 'preset'}.prst`;
   document.body.appendChild(a);
   a.click();
