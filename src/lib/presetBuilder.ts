@@ -248,13 +248,11 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
  * The pedal editor expects the file to contain the raw Base64 string.
  */
 export function downloadPresetFile(built: BuiltPreset): void {
-  const blob = new Blob([built.base64], { type: 'text/plain;charset=utf-8' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href     = url;
-  a.download = `${built.nomePatch || 'preset'}.prst`;
+  const cleanBase64 = built.base64.replace(/[\r\n]/g, '');
+  const a = document.createElement('a');
+  a.href = `data:application/octet-stream;base64,${cleanBase64}`;
+  a.download = `${(built.nomePatch || 'preset').replace(/\s+/g, '_')}.prst`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }
