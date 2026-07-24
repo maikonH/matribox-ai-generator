@@ -278,15 +278,19 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
 /**
  * Trigger a browser download of the preset as a .prst file.
  *
- * The file format is: Base64( JSON.stringify( Array.from(binaryBytes) ) )
- * This matches the exact format of known-good .prst files accepted by
- * the Matribox II Pro firmware.
+ * The file content must be a single continuous Base64 line — the exact
+ * text the Matribox II Pro desktop manager reads and decodes. Using a Blob
+ * (not a `data:...;base64,` URI) ensures the browser writes the Base64
+ * string verbatim instead of decoding it back to plaintext.
  */
 export function downloadPresetFile(built: BuiltPreset): void {
+  const blob = new Blob([built.base64], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = `data:application/octet-stream;base64,${built.base64}`;
+  a.href = url;
   a.download = `${(built.nomePatch || 'preset').replace(/\s+/g, '_')}.prst`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
