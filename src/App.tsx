@@ -70,9 +70,17 @@ export default function App() {
       if (prevAi) {
         const cadeia = prevAi.cadeia.map((entry, i) => {
           if (i !== moduleIndex) return entry;
-          const knobs = entry.knobs.map((k, kIdx) =>
-            kIdx === paramIndex ? Math.round(value) : k,
-          );
+          const knobs = entry.knobs.map((k, kIdx) => {
+            if (kIdx !== paramIndex) return k;
+            // qKnob is always 0–100; normalize the slider's native-range value
+            // back to that scale using the param's own min/max.
+            const mod = preset?.modules[moduleIndex];
+            const p = mod?.params[paramIndex];
+            if (!p) return Math.round(value);
+            const span = p.max - p.min;
+            const norm = span > 0 ? ((value - p.min) / span) * 100 : value;
+            return Math.min(100, Math.max(0, Math.round(norm)));
+          });
           return { ...entry, knobs };
         });
         const updated = { ...prevAi, cadeia };
