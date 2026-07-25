@@ -142,10 +142,6 @@ function clampKnob(value: number): number {
   return Math.min(100, Math.max(0, Math.round(value)));
 }
 
-function fixed1(value: number): string {
-  return (Math.round(value * 10) / 10).toFixed(1);
-}
-
 function writeU32LE(target: Uint8Array, offset: number, value: number): void {
   target[offset] = value & 0xff;
   target[offset + 1] = (value >>> 8) & 0xff;
@@ -227,26 +223,13 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
     throw new Error(msg);
   }
 
-  // 1. Preset object in strict field order with ONLY the native Dart firmware
-  //    keys. bpm/level use .toFixed(1) so the Dart firmware parses them as
-  //    doubles with the required decimal places.
-  //    - chain: physical slot indices by category (e.g. [0,3,4,5,7,8,9]), never
-  //      the 32-bit fxids.
-  //    - Modules: one entry per hardware slot, strictly {fxid, active, qKnob}.
-  //    - qKnob: array of {knobID, value} only — no extra keys.
-  const presetObject = {
-    presetName: nomePatch,
-    bpm: fixed1(120),
-    level: fixed1(50),
-    chain,
-    Modules: slotState.map((s) => ({
-      fxid: s.fxid,
-      active: s.active ? 1 : 0,
-      qKnob: s.qKnob,
-    })),
-  };
-
-  const jsonText = JSON.stringify(presetObject);
+  // 1. Geração estrita da string JSON compacta manual para garantir compatibilidade com o Dart
+  const modulesText = JSON.stringify(slotState.map((s) => ({
+    fxid: s.fxid,
+    active: s.active ? 1 : 0,
+    qKnob: s.qKnob
+  })));
+  const jsonText = `{"presetName":"${nomePatch}","bpm":120.0,"level":50.0,"chain":${JSON.stringify(chain)},"Modules":${modulesText}}`;
   const jsonBytes = new TextEncoder().encode(jsonText);
 
   // 3. Adler-32 over the clean JSON bytes.
