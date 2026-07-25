@@ -1,59 +1,28 @@
-// Matribox II Pro (.prst) preset file builder — Binary Envelope Edition.
+// Matribox II Pro (.prst) preset file builder — Skeleton Mutator Edition.
 //
-// FILE FORMAT (verified against src/docs/analise.prst):
+// FILE FORMAT (verified against src/data/01-B_Love_of_God.prst):
 //   The .prst file on disk is a single continuous Base64 line produced by:
-//     btoa( JSON.stringify( Array.from( finalByteArray ) ) )
+//     btoa( JSON.stringify( Array.from( byteArray440 ) ) )
 //   i.e. the base64 wraps the TEXT of a JSON number array, not raw bytes.
-//   Decoding the reference file yields "[3,2,0,0,16,11,0,128,..." — the
-//   20-byte binary header followed by the processed payload. The base64 of
-//   the raw header bytes [3,2,0,0,16,11] is "AwIAABAL", the signature the
-//   Matribox II Pro firmware validates before loading a chain.
+//   Decoding the reference file yields a 440-element numeric array — the
+//   fixed-size binary skeleton the Matribox II Pro firmware expects.
 //
-// PIPELINE (Rota B — Full JSON, strict mathematical):
-//   1. Build the preset object in strict field order with ONLY the native
-//      Dart firmware keys:
-//        {
-//          "presetName": "...",
-//          "bpm": 120.0,
-//          "level": 50.0,
-//          "chain": [0,3,4,5,7,8,9],          // physical slot indices by category
-//          "Modules": [                         // one entry per hardware slot
-//            { "fxid": 27, "active": 1, "qKnob": [{"knobID":0,"value":45}] },
-//            { "fxid": 0,  "active": 0, "qKnob": [] },
-//            ...
-//          ]
-//        }
-//      `chain` carries physical slot indices (NOT the 32-bit fxids). Each
-//      `Modules` element has strictly {fxid, active, qKnob} — no `modulo`,
-//      `nomeEfeito`, or `knobs` keys. Each `qKnob` element has strictly
-//      {knobID, value}. bpm/level use .toFixed(1) so the Dart firmware parses
-//      them as doubles with the required decimal places.
-//   2. Encode that JSON string to a clean UTF-8 Uint8Array.
-//   3. Compute the Adler-32 checksum over the clean byte array.
-//   4. Assemble the 20-byte Little-Endian header:
-//        [0-3]   = [3, 2, 0, 0]            (magic)
-//        [4-7]   = [16, 11, 0, 128]        (version)
-//        [8-11]  = dynamic seed (uint32 LE, clock-derived)
-//        [12-15] = Adler-32 checksum (uint32 LE)
-//        [16-19] = clean JSON byte length (uint32 LE)
-//   5. Apply the LCG stream cipher to a CLONE of the payload:
-//        A = 1103515245, C = 12345, M = 0x80000000
-//        Leave the first 32 bytes of the JSON plaintext.
-//        XOR bytes [32..544) with (state >> 16) & 0xFF, advancing the LCG
-//        state once per skipped byte (32 advances during the skip) to keep
-//        the firmware's stream synchronised.
-//   6. Concatenate header (20 bytes) + processed payload.
-//   7. Convert the unified byte array to Base64 via a binary string:
-//        let binaryString = '';
-//        for (i ...) binaryString += String.fromCharCode(bytes[i]);
-//        btoa(binaryString)
-//      This applies Base64 directly over the raw bytes (ratio ~1.33×),
-//      NOT over the "[3,2,0,..." JSON-array text (which inflates to ~3×).
+// SKELETON MUTATOR APPROACH:
+//   Instead of generating JSON text from scratch (which inflates the file
+//   beyond the firmware's memory), we load a stable 440-byte factory preset
+//   as an immutable base matrix and mutate ONLY the audio-data bytes at
+//   verified fixed offsets:
 //
-// There is NO template skeleton and NO plaintext-JSON shortcut. If any
-// effect cannot be resolved to a real fxid the builder throws, so the app
-// never emits a capped or empty file.
+//   OFFSET  LAYOUT                                          STATUS
+//   30      Preset name (ASCII, null-terminated, max 12ch)  VERIFIED
+//   175     8 × fxid (uint32 LE) — the signal chain          VERIFIED
+//   222     32 × knob value (float32 LE) — normalized 0-100  SPECIFIED
+//
+//   No textual JSON keys, braces, or strings are injected into the payload.
+//   The 440 bytes stay rigid. The output is always exactly 440 elements,
+//   producing the same compact Base64 line length as the factory presets.
 
+import referenceBase64 from '../data/01-B_Love_of_God.prst?raw';
 import { resolveFxId } from './algorithmCatalog';
 import { findSlotForCode, HARDWARE_SLOTS } from './hardwareSlots';
 
@@ -72,68 +41,64 @@ export interface AiPresetResponse {
 }
 
 export interface BuiltPreset {
-  /** Final .prst file content: base64( JSON.stringify(Array.from(bytes)) ). */
+  /** Final .prst file content: btoa( JSON.stringify( Array.from( bytes440 ) ) ). */
   base64: string;
   nomePatch: string;
 }
 
-// ── Adler-32 ──────────────────────────────────────────────────────────────────
+// ── Constants (verified offsets) ─────────────────────────────────────────────
 
-const ADLER_MOD = 0x10000; // 65521 base, split into 16-bit halves
+const SKELETON_SIZE = 440;
+const NAME_OFFSET = 30;
+const NAME_MAX_LENGTH = 12;
+const FXID_OFFSET = 175;
+const FXID_COUNT = 8;
+const FXID_SIZE = 4; // uint32 LE
+const KNOB_OFFSET = 222;
+const KNOB_COUNT = 32;
+const KNOB_SIZE = 4; // float32 LE
 
-function adler32(data: Uint8Array): number {
-  let a = 1;
-  let b = 0;
-  for (let i = 0; i < data.length; i++) {
-    a = (a + data[i]) % 65521;
-    b = (b + a) % 65521;
+// ── Base skeleton loader ─────────────────────────────────────────────────────
+
+let cachedSkeleton: number[] | null = null;
+
+function loadBaseSkeleton(): number[] {
+  if (cachedSkeleton) return cachedSkeleton.slice();
+  const text = referenceBase64.trim();
+  const decoded = atob(text);
+  const arr = JSON.parse(decoded) as number[];
+  if (arr.length !== SKELETON_SIZE) {
+    throw new Error(
+      `Esqueleto base inválido: esperado ${SKELETON_SIZE} bytes, recebido ${arr.length}.`,
+    );
   }
-  return ((b << 16) | a) >>> 0;
+  cachedSkeleton = arr;
+  return arr.slice();
 }
 
-// ── LCG stream cipher ──────────────────────────────────────────────────────────
-// A = 1103515245, C = 12345, M = 0x80000000 (mod 2^31). State is uint32.
+// ── Byte writers ──────────────────────────────────────────────────────────────
 
-const LCG_A = 1103515245;
-const LCG_C = 12345;
-const LCG_M = 0x80000000;
-
-function lcgNext(state: number): number {
-  // Operate in 32-bit unsigned space; M = 2^31 so mask with 0x7fffffff.
-  return ((Math.imul(state, LCG_A) + LCG_C) & 0x7fffffff) >>> 0;
+function writeU32LE(target: number[], offset: number, value: number): void {
+  target[offset] = value & 0xff;
+  target[offset + 1] = (value >>> 8) & 0xff;
+  target[offset + 2] = (value >>> 16) & 0xff;
+  target[offset + 3] = (value >>> 24) & 0xff;
 }
 
-/**
- * Apply the LCG XOR cipher to a clone of the payload.
- * - Bytes [0, 32) are left plaintext.
- * - Bytes [32, 544) are XORed with (state >> 16) & 0xFF.
- * - The LCG state advances once per byte across the whole window (32 advances
- *   during the skip, then one advance per XORed byte) to keep the firmware's
- *   stream synchronised.
- */
-function applyLcgCipher(payload: Uint8Array, seed: number): Uint8Array {
-  const out = new Uint8Array(payload.length);
-  out.set(payload.subarray(0, Math.min(32, payload.length)));
-
-  let state = seed >>> 0;
-  // Advance the LCG 32 times during the plaintext skip to stay in sync.
-  for (let i = 0; i < 32; i++) state = lcgNext(state);
-
-  const cipherEnd = Math.min(544, payload.length);
-  for (let i = 32; i < cipherEnd; i++) {
-    state = lcgNext(state);
-    const keyByte = (state >>> 16) & 0xff;
-    out[i] = payload[i] ^ keyByte;
-  }
-  // Bytes beyond the cipher window are copied verbatim.
-  for (let i = cipherEnd; i < payload.length; i++) out[i] = payload[i];
-  return out;
+function writeFloat32LE(target: number[], offset: number, value: number): void {
+  const buf = new ArrayBuffer(4);
+  new DataView(buf).setFloat32(0, value, true);
+  const view = new Uint8Array(buf);
+  target[offset] = view[0];
+  target[offset + 1] = view[1];
+  target[offset + 2] = view[2];
+  target[offset + 3] = view[3];
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function sanitizeName(name: string): string {
-  const cleaned = (name || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 12);
+  const cleaned = (name || '').replace(/[^A-Za-z0-9 ]/g, '').trim().slice(0, NAME_MAX_LENGTH);
   return cleaned || 'Preset';
 }
 
@@ -142,48 +107,34 @@ function clampKnob(value: number): number {
   return Math.min(100, Math.max(0, Math.round(value)));
 }
 
-function writeU32LE(target: Uint8Array, offset: number, value: number): void {
-  target[offset] = value & 0xff;
-  target[offset + 1] = (value >>> 8) & 0xff;
-  target[offset + 2] = (value >>> 16) & 0xff;
-  target[offset + 3] = (value >>> 24) & 0xff;
-}
-
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Build a valid .prst file from the AI-generated preset (Rota B — Full JSON).
+ * Build a valid .prst file from the AI-generated preset (Skeleton Mutator).
  *
- * Resolves every effect in `ai.cadeia` to its real numeric fxid from the
- * algorithm catalog (the alg_data.json / app.so projection), orders them into
- * the `chain` array in signal-chain order, and emits each knob as an integer
- * 0–100 in `qKnob`. The resulting JSON object is envelope-encoded with the
- * 20-byte binary header, Adler-32 checksum, and LCG stream cipher the
- * Matribox II Pro firmware requires, then wrapped as
- * base64( JSON.stringify( Array.from( bytes ) ) ) — a single continuous line
- * of ~1.5–1.7 KB for a full chain.
+ * Loads the 440-byte factory skeleton, patches the preset name at offset 30,
+ * the 8 chain fxids (uint32 LE) at offset 175, and the 32 knob values
+ * (float32 LE, normalized 0–100) at offset 222. The 440 bytes stay rigid —
+ * no textual JSON is injected — and the result is encoded as
+ * btoa(JSON.stringify(Array.from(bytes440))), producing the same compact
+ * single-line Base64 as factory presets.
  *
- * Throws if any effect cannot be resolved to a real fxid, so the app never
- * produces a capped or empty preset file.
+ * Throws if any effect cannot be resolved to a real fxid.
  */
 export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
   const nomePatch = sanitizeName(ai.nomePatch);
 
-  // Resolve each cadeia entry to its hardware slot index + fxid + knobs.
-  // The firmware's `chain` array carries physical slot indices (by category
-  // order), NOT the 32-bit fxids. `Modules` carries one entry per hardware
-  // slot (all 10), with active=1 for populated slots and active=0 otherwise.
-  const slotState: Array<{
-    active: boolean;
-    fxid: number;
-    qKnob: Array<{ knobID: number; value: number }>;
-  }> = HARDWARE_SLOTS.map(() => ({ active: false, fxid: 0, qKnob: [] }));
+  // Start from the immutable factory skeleton.
+  const bytes = loadBaseSkeleton();
 
-  const chain: number[] = [];
+  // Resolve each cadeia entry to its fxid + knob values.
   const errors: string[] = [];
+  const fxids: number[] = [];
+  const knobs: number[] = [];
 
-  for (let i = 0; i < ai.cadeia.length; i++) {
+  for (let i = 0; i < ai.cadeia.length && i < FXID_COUNT; i++) {
     const entry = ai.cadeia[i];
+
     const slot = findSlotForCode(entry.modulo);
     if (!slot) {
       errors.push(
@@ -191,8 +142,6 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
       );
       continue;
     }
-
-    const slotIndex = HARDWARE_SLOTS.indexOf(slot);
 
     const fxid = resolveFxId(entry.nomeEfeito);
     if (fxid === undefined) {
@@ -202,76 +151,56 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
       continue;
     }
 
-    const qKnob = entry.knobs.map((value, kIdx) => ({
-      knobID: kIdx,
-      value: clampKnob(value),
-    }));
+    fxids.push(fxid);
 
-    slotState[slotIndex] = { active: true, fxid, qKnob };
-    chain.push(slotIndex);
+    // Collect knob values, clamped to 0–100. Each module contributes its
+    // params in order; the 32-slot knob table is filled sequentially.
+    for (const raw of entry.knobs) {
+      if (knobs.length < KNOB_COUNT) {
+        knobs.push(clampKnob(raw));
+      }
+    }
   }
 
-  if (chain.length === 0) {
+  if (fxids.length === 0) {
     errors.push('A cadeia de sinal está vazia — nenhum módulo ativo para gerar o preset.');
   }
 
   if (errors.length > 0) {
-    const msg = `Falha ao construir o preset (Rota B — Full JSON):\n${errors.join('\n')}`;
+    const msg = `Falha ao construir o preset (Skeleton Mutator):\n${errors.join('\n')}`;
     console.error('===== PRESET BUILD FAILURE =====');
     console.error(msg);
     console.error('Input:', JSON.stringify(ai, null, 2));
     throw new Error(msg);
   }
 
-  // 1. Geração estrita da string JSON compacta manual para garantir compatibilidade com o Dart
-  const modulesText = JSON.stringify(slotState.map((s) => ({
-    fxid: s.fxid,
-    active: s.active ? 1 : 0,
-    qKnob: s.qKnob
-  })));
-  const jsonText = `{"presetName":"${nomePatch}","bpm":120.0,"level":50.0,"chain":${JSON.stringify(chain)},"Modules":${modulesText}}`;
-  const jsonBytes = new TextEncoder().encode(jsonText);
-
-  // 3. Adler-32 over the clean JSON bytes.
-  const checksum = adler32(jsonBytes);
-
-  // 4. 20-byte Little-Endian header.
-  const seed = (Date.now() & 0x7fffffff) >>> 0;
-  const header = new Uint8Array(20);
-  header[0] = 3;
-  header[1] = 2;
-  header[2] = 0;
-  header[3] = 0;
-  header[4] = 16;
-  header[5] = 11;
-  header[6] = 0;
-  header[7] = 128;
-  writeU32LE(header, 8, seed);
-  writeU32LE(header, 12, checksum);
-  writeU32LE(header, 16, jsonBytes.length);
-
-  // 5. LCG cipher over a clone of the payload (skip 32, XOR next 512).
-  const processedPayload = applyLcgCipher(jsonBytes, seed);
-
-  // 6. Concatenate header + processed payload.
-  const finalArray = new Uint8Array(header.length + processedPayload.length);
-  finalArray.set(header, 0);
-  finalArray.set(processedPayload, header.length);
-
-  // 7. Convert raw binary bytes directly to Base64 — NOT via JSON.stringify of
-  //    the array text. Building a binary string char-by-char and feeding it to
-  //    btoa() keeps the output to ~1.33× the raw byte count (the 440-byte
-  //    reference lands at 588 chars this way), instead of inflating to ~3× via
-  //    the "[3,2,0,..." text representation.
-  let binaryString = '';
-  for (let i = 0; i < finalArray.length; i++) {
-    binaryString += String.fromCharCode(finalArray[i]);
+  // 1. Patch the preset name at offset 30 (ASCII, null-terminated).
+  for (let i = 0; i < NAME_MAX_LENGTH; i++) {
+    bytes[NAME_OFFSET + i] = i < nomePatch.length ? nomePatch.charCodeAt(i) : 0;
   }
-  const base64 = btoa(binaryString).replace(/[\r\n]/g, '');
 
-  console.log('===== PRESET FILE (Binary Envelope — Rota B) =====');
+  // 2. Patch the 8 fxids (uint32 LE) at offset 175.
+  for (let i = 0; i < FXID_COUNT; i++) {
+    if (i < fxids.length) {
+      writeU32LE(bytes, FXID_OFFSET + i * FXID_SIZE, fxids[i]);
+    } else {
+      // Zero out unused fxid slots.
+      writeU32LE(bytes, FXID_OFFSET + i * FXID_SIZE, 0);
+    }
+  }
+
+  // 3. Patch the 32 knob values (float32 LE, 0–100) at offset 222.
+  for (let i = 0; i < KNOB_COUNT; i++) {
+    writeFloat32LE(bytes, KNOB_OFFSET + i * KNOB_SIZE, i < knobs.length ? knobs[i] : 0);
+  }
+
+  // 4. Encode as btoa( JSON.stringify( Array.from( bytes440 ) ) ).
+  const jsonText = JSON.stringify(bytes);
+  const base64 = btoa(jsonText);
+
+  console.log('===== PRESET FILE (Skeleton Mutator) =====');
   console.log(
-    `name=${nomePatch} modules=${chain.length} jsonBytes=${jsonBytes.length} checksum=${checksum.toString(16)} seed=${seed.toString(16)} totalBytes=${finalArray.length} base64Length=${base64.length}`,
+    `name="${nomePatch}" modules=${fxids.length} knobs=${knobs.length} bytes=${bytes.length} base64Length=${base64.length}`,
   );
 
   return { base64, nomePatch };
