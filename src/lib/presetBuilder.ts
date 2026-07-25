@@ -186,7 +186,24 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
     bytes[KNOB_OFFSET + i * KNOB_SIZE] = i < knobs.length ? knobs[i] : 0;
   }
 
-  // 4. Encode as btoa( JSON.stringify( Array.from( bytes440 ) ) ).
+  // 4. Lock the rigid 440-element limit. The audio block (offsets 175–253)
+  //    contains ONLY pure numbers: uint32 fxids and uint8 knob values. No
+  //    textual strings, keys, or substructures are ever injected. The footer
+  //    bytes 254–439 of the original skeleton stay 100% untouched.
+  if (bytes.length !== SKELETON_SIZE) {
+    throw new Error(
+      `Violação de limite físico: array tem ${bytes.length} elementos, esperado exatamente ${SKELETON_SIZE}.`,
+    );
+  }
+  for (let i = 0; i < bytes.length; i++) {
+    if (!Number.isInteger(bytes[i]) || bytes[i] < 0 || bytes[i] > 255) {
+      throw new Error(
+        `Byte inválido na posição ${i}: valor=${bytes[i]} — apenas inteiros 0–255 são permitidos no payload.`,
+      );
+    }
+  }
+
+  // 5. Encode as btoa( JSON.stringify( Array.from( bytes440 ) ) ).
   const jsonText = JSON.stringify(bytes);
   const base64 = btoa(jsonText);
 
