@@ -173,10 +173,11 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
   for (let i = 0; i < FXID_COUNT; i++) {
     if (i < fxids.length) {
       writeU32LE(bytes, FXID_OFFSET + i * FXID_SIZE, fxids[i]);
-    } else {
-      // Zero out unused fxid slots.
-      writeU32LE(bytes, FXID_OFFSET + i * FXID_SIZE, 0);
     }
+    // Slots not filled by the AI are left untouched: the factory fxid
+    // already baked into the base skeleton is kept verbatim. Injecting 0
+    // here corrupts the firmware's pointer table and crashes the desktop
+    // manager with a 0xFFFFFFFFFFFFFFFF memory error.
   }
 
   // 3. Patch the 32 knob values (uint8, 0–100) at offset 222. Each knob is a
