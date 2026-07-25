@@ -16,7 +16,7 @@
 //   OFFSET  LAYOUT                                          STATUS
 //   30      Preset name (ASCII, null-terminated, max 12ch)  VERIFIED
 //   175     8 × fxid (uint32 LE) — the signal chain          VERIFIED
-//   222     32 × knob value (float32 LE) — normalized 0-100  SPECIFIED
+//   222     32 × knob value (uint8, 0-100) — one byte each      VERIFIED
 //
 //   No textual JSON keys, braces, or strings are injected into the payload.
 //   The 440 bytes stay rigid. The output is always exactly 440 elements,
@@ -56,7 +56,7 @@ const FXID_COUNT = 8;
 const FXID_SIZE = 4; // uint32 LE
 const KNOB_OFFSET = 222;
 const KNOB_COUNT = 32;
-const KNOB_SIZE = 4; // float32 LE
+const KNOB_SIZE = 1; // uint8 — one byte per knob (0-100)
 
 // ── Base skeleton loader ─────────────────────────────────────────────────────
 
@@ -85,16 +85,6 @@ function writeU32LE(target: number[], offset: number, value: number): void {
   target[offset + 3] = (value >>> 24) & 0xff;
 }
 
-function writeFloat32LE(target: number[], offset: number, value: number): void {
-  const buf = new ArrayBuffer(4);
-  new DataView(buf).setFloat32(0, value, true);
-  const view = new Uint8Array(buf);
-  target[offset] = view[0];
-  target[offset + 1] = view[1];
-  target[offset + 2] = view[2];
-  target[offset + 3] = view[3];
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function sanitizeName(name: string): string {
@@ -114,7 +104,7 @@ function clampKnob(value: number): number {
  *
  * Loads the 440-byte factory skeleton, patches the preset name at offset 30,
  * the 8 chain fxids (uint32 LE) at offset 175, and the 32 knob values
- * (float32 LE, normalized 0–100) at offset 222. The 440 bytes stay rigid —
+ * (uint8, 0–100, one byte each) at offset 222. The 440 bytes stay rigid —
  * no textual JSON is injected — and the result is encoded as
  * btoa(JSON.stringify(Array.from(bytes440))), producing the same compact
  * single-line Base64 as factory presets.
@@ -189,9 +179,11 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
     }
   }
 
-  // 3. Patch the 32 knob values (float32 LE, 0–100) at offset 222.
+  // 3. Patch the 32 knob values (uint8, 0–100) at offset 222. Each knob is a
+  //    single byte, so the 32 values occupy bytes 222–253; the footer bytes
+  //    254–439 of the original skeleton remain untouched and aligned.
   for (let i = 0; i < KNOB_COUNT; i++) {
-    writeFloat32LE(bytes, KNOB_OFFSET + i * KNOB_SIZE, i < knobs.length ? knobs[i] : 0);
+    bytes[KNOB_OFFSET + i * KNOB_SIZE] = i < knobs.length ? knobs[i] : 0;
   }
 
   // 4. Encode as btoa( JSON.stringify( Array.from( bytes440 ) ) ).
