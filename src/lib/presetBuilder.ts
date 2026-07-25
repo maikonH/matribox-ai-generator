@@ -10,10 +10,24 @@
 //   Matribox II Pro firmware validates before loading a chain.
 //
 // PIPELINE (Rota B — Full JSON, strict mathematical):
-//   1. Build the preset object in strict field order:
-//        {"presetName":"...","bpm":120.0,"level":50.0,"chain":[...],"Modules":[...]}
-//      Numeric fields use .toFixed(1) so the Dart firmware parses them as
-//      doubles with the required decimal places.
+//   1. Build the preset object in strict field order with ONLY the native
+//      Dart firmware keys:
+//        {
+//          "presetName": "...",
+//          "bpm": 120.0,
+//          "level": 50.0,
+//          "chain": [0,3,4,5,7,8,9],          // physical slot indices by category
+//          "Modules": [                         // one entry per hardware slot
+//            { "fxid": 27, "active": 1, "qKnob": [{"knobID":0,"value":45}] },
+//            { "fxid": 0,  "active": 0, "qKnob": [] },
+//            ...
+//          ]
+//        }
+//      `chain` carries physical slot indices (NOT the 32-bit fxids). Each
+//      `Modules` element has strictly {fxid, active, qKnob} — no `modulo`,
+//      `nomeEfeito`, or `knobs` keys. Each `qKnob` element has strictly
+//      {knobID, value}. bpm/level use .toFixed(1) so the Dart firmware parses
+//      them as doubles with the required decimal places.
 //   2. Encode that JSON string to a clean UTF-8 Uint8Array.
 //   3. Compute the Adler-32 checksum over the clean byte array.
 //   4. Assemble the 20-byte Little-Endian header:
@@ -159,13 +173,17 @@ function writeU32LE(target: Uint8Array, offset: number, value: number): void {
 export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
   const nomePatch = sanitizeName(ai.nomePatch);
 
-  const chain: Array<{
-    modulo: string;
+  // Resolve each cadeia entry to its hardware slot index + fxid + knobs.
+  // The firmware's `chain` array carries physical slot indices (by category
+  // order), NOT the 32-bit fxids. `Modules` carries one entry per hardware
+  // slot (all 10), with active=1 for populated slots and active=0 otherwise.
+  const slotState: Array<{
+    active: boolean;
     fxid: number;
-    nomeEfeito: string;
-    qKnob: number[];
-  }> = [];
-  const modulesMeta: Array<{ modulo: string; fxid: number; nomeEfeito: string; knobs: number }> = [];
+    qKnob: Array<{ knobID: number; value: number }>;
+  }> = HARDWARE_SLOTS.map(() => ({ active: false, fxid: 0, qKnob: [] }));
+
+  const chain: number[] = [];
   const errors: string[] = [];
 
   for (let i = 0; i < ai.cadeia.length; i++) {
@@ -178,6 +196,8 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
       continue;
     }
 
+    const slotIndex = HARDWARE_SLOTS.indexOf(slot);
+
     const fxid = resolveFxId(entry.nomeEfeito);
     if (fxid === undefined) {
       errors.push(
@@ -186,15 +206,13 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
       continue;
     }
 
-    const qKnob = entry.knobs.map(clampKnob);
+    const qKnob = entry.knobs.map((value, kIdx) => ({
+      knobID: kIdx,
+      value: clampKnob(value),
+    }));
 
-    chain.push({
-      modulo: slot.code,
-      fxid,
-      nomeEfeito: entry.nomeEfeito,
-      qKnob,
-    });
-    modulesMeta.push({ modulo: slot.code, fxid, nomeEfeito: entry.nomeEfeito, knobs: qKnob.length });
+    slotState[slotIndex] = { active: true, fxid, qKnob };
+    chain.push(slotIndex);
   }
 
   if (chain.length === 0) {
@@ -209,23 +227,22 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
     throw new Error(msg);
   }
 
-  // 1. Preset object in strict field order. bpm/level use .toFixed(1) so the
-  //    Dart firmware parses them as doubles with the required decimals.
+  // 1. Preset object in strict field order with ONLY the native Dart firmware
+  //    keys. bpm/level use .toFixed(1) so the Dart firmware parses them as
+  //    doubles with the required decimal places.
+  //    - chain: physical slot indices by category (e.g. [0,3,4,5,7,8,9]), never
+  //      the 32-bit fxids.
+  //    - Modules: one entry per hardware slot, strictly {fxid, active, qKnob}.
+  //    - qKnob: array of {knobID, value} only — no extra keys.
   const presetObject = {
     presetName: nomePatch,
     bpm: fixed1(120),
     level: fixed1(50),
-    chain: chain.map((m) => ({
-      modulo: m.modulo,
-      fxid: m.fxid,
-      nomeEfeito: m.nomeEfeito,
-      qKnob: m.qKnob,
-    })),
-    Modules: modulesMeta.map((m) => ({
-      modulo: m.modulo,
-      fxid: m.fxid,
-      nomeEfeito: m.nomeEfeito,
-      knobs: m.knobs,
+    chain,
+    Modules: slotState.map((s) => ({
+      fxid: s.fxid,
+      active: s.active ? 1 : 0,
+      qKnob: s.qKnob,
     })),
   };
 
