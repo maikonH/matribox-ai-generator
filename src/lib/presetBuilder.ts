@@ -29,7 +29,12 @@
 //        state once per skipped byte (32 advances during the skip) to keep
 //        the firmware's stream synchronised.
 //   6. Concatenate header (20 bytes) + processed payload.
-//   7. Emit btoa( JSON.stringify( Array.from( finalByteArray ) ) ).
+//   7. Convert the unified byte array to Base64 via a binary string:
+//        let binaryString = '';
+//        for (i ...) binaryString += String.fromCharCode(bytes[i]);
+//        btoa(binaryString)
+//      This applies Base64 directly over the raw bytes (ratio ~1.33×),
+//      NOT over the "[3,2,0,..." JSON-array text (which inflates to ~3×).
 //
 // There is NO template skeleton and NO plaintext-JSON shortcut. If any
 // effect cannot be resolved to a real fxid the builder throws, so the app
@@ -253,9 +258,16 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
   finalArray.set(header, 0);
   finalArray.set(processedPayload, header.length);
 
-  // 7. btoa( JSON.stringify( Array.from( finalArray ) ) ).
-  const arrayText = JSON.stringify(Array.from(finalArray));
-  const base64 = btoa(arrayText);
+  // 7. Convert raw binary bytes directly to Base64 — NOT via JSON.stringify of
+  //    the array text. Building a binary string char-by-char and feeding it to
+  //    btoa() keeps the output to ~1.33× the raw byte count (the 440-byte
+  //    reference lands at 588 chars this way), instead of inflating to ~3× via
+  //    the "[3,2,0,..." text representation.
+  let binaryString = '';
+  for (let i = 0; i < finalArray.length; i++) {
+    binaryString += String.fromCharCode(finalArray[i]);
+  }
+  const base64 = btoa(binaryString).replace(/[\r\n]/g, '');
 
   console.log('===== PRESET FILE (Binary Envelope — Rota B) =====');
   console.log(
@@ -269,8 +281,8 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
  * Trigger a browser download of the preset as a .prst file.
  *
  * The file content is a single continuous Base64 line — the exact text the
- * Matribox II Pro desktop manager reads and decodes. Using a Blob (not a
- * `data:...;base64,` URI) writes the Base64 string verbatim.
+ * Matribox II Pro desktop manager reads and decodes. The Blob carries the
+ * Base64 string verbatim (no `data:` URI decoding in between).
  */
 export function downloadPresetFile(built: BuiltPreset): void {
   const blob = new Blob([built.base64], { type: 'application/octet-stream' });
