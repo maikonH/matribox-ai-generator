@@ -183,8 +183,11 @@ export function buildPresetFile(ai: AiPresetResponse): BuiltPreset {
   // 3. Patch the 32 knob values (uint8, 0–100) at offset 222. Each knob is a
   //    single byte, so the 32 values occupy bytes 222–253; the footer bytes
   //    254–439 of the original skeleton remain untouched and aligned.
-  for (let i = 0; i < KNOB_COUNT; i++) {
-    bytes[KNOB_OFFSET + i * KNOB_SIZE] = i < knobs.length ? knobs[i] : 0;
+  // Apenas os índices recebidos da IA são sobrescritos; os knobs restantes
+  // preservam o valor nativo de fábrica já gravado no esqueleto base, evitando
+  // zerar volumes de bypass e causar leitura nula no firmware.
+  for (let i = 0; i < knobs.length && i < KNOB_COUNT; i++) {
+    bytes[KNOB_OFFSET + i * KNOB_SIZE] = knobs[i];
   }
 
   // 4. Lock the rigid 440-element limit. The audio block (offsets 175–253)
