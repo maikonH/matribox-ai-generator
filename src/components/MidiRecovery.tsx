@@ -1,10 +1,14 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Usb, Activity, Zap, RotateCcw, ChevronDown, ChevronUp, Radio, Trash2, Pause, Play } from 'lucide-react';
+import { Usb, Activity, Zap, RotateCcw, ChevronDown, ChevronUp, Radio, Trash2, Pause, Play, Terminal } from 'lucide-react';
 import {
   RECOVERY_SEQUENCE,
   INDIVIDUAL_COMMANDS,
-  buildBankChange,
+  buildRawSysex,
+  buildPresetRequest,
   bytesToHex,
+  MATRIBOX_MANUFACTURER,
+  MATRIBOX_FAMILY,
+  CMD_PRESET_DUMP,
   type MidiCommand,
 } from '../lib/midiCommands';
 
@@ -34,6 +38,35 @@ function decodeMidiMessage(data: Uint8Array): { type: string; decoded: string } 
     const end = data.indexOf(0xf7);
     const body = end > 0 ? data.slice(1, end) : data.slice(1);
     const hex = bytesToHex(Array.from(body));
+
+    // Matribox II Pro format: 21 25 4D 50 00 [preset_hi] [preset_mid] [cmd] [data...]
+    if (
+      body.length >= 7 &&
+      body[0] === MATRIBOX_MANUFACTURER &&
+      body[1] === MATRIBOX_FAMILY[0] &&
+      body[2] === MATRIBOX_FAMILY[1] &&
+      body[3] === MATRIBOX_FAMILY[2] &&
+      body[4] === 0x00
+    ) {
+      const presetNum = (body[5] << 7) | body[6];
+      const cmdId = body[7];
+      const payload = body.slice(8);
+      const cmdNames: Record<number, string> = {
+        [CMD_PRESET_DUMP]: 'Preset Dump (resposta)',
+        0x02: 'Request Preset',
+        0x03: 'Request Preset List',
+        0x04: 'Delete Preset',
+        0x01: 'Jump to Firmware',
+        0x7f: 'Reset FileSystem',
+      };
+      const cmdName = cmdNames[cmdId] ?? `Comando 0x${cmdId.toString(16).padStart(2, '0').toUpperCase()}`;
+      return {
+        type: 'SysEx',
+        decoded: `Matribox SysEx — ${cmdName}, Preset ${presetNum}, ${payload.length} byte(s) de dados`,
+      };
+    }
+
+    // Generic SysEx
     if (body.length >= 4 && body[0] === 0x00) {
       const manufacturer = `${body[0].toString(16).padStart(2, '0')} ${body[1].toString(16).padStart(2, '0')} ${body[2].toString(16).padStart(2, '0')}`;
       const cmdId = body[3];
@@ -126,9 +159,9 @@ export default function MidiRecovery() {
   const [monitor, setMonitor] = useState<MonitorEntry[]>([]);
   const [monitoring, setMonitoring] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [bank, setBank] = useState(0);
-  const [preset, setPreset] = useState(0);
   const [showEffects, setShowEffects] = useState(false);
+  const [rawSysex, setRawSysex] = useState('F0 21 25 4D 50 00 02 00 00 F7');
+  const [presetReq, setPresetReq] = useState(0);
   const outputRef = useRef<MIDIOutput | null>(null);
   const midiAccessRef = useRef<MIDIAccess | null>(null);
   const activeInputRef = useRef<MIDIInput | null>(null);
@@ -282,20 +315,39 @@ export default function MidiRecovery() {
     setBusy(false);
   }, [getOutput, addLog]);
 
-  const sendCustomBank = useCallback(() => {
+  const sendRawSysex = useCallback(() => {
     const out = getOutput();
     if (!out) {
       addLog('Conecte um dispositivo de saída primeiro', false);
       return;
     }
-    const bytes = buildBankChange(bank, preset);
+    const bytes = buildRawSysex(rawSysex);
+    if (bytes.length === 0) {
+      addLog('Hex inválido — digite bytes válidos (ex: F0 21 25 ... F7)', false);
+      return;
+    }
     try {
       out.send(bytes);
-      addLog(`Banco ${bank + 1} / Preset ${String.fromCharCode(65 + preset)} → [${bytesToHex(bytes)}]`, true, 'out');
+      addLog(`SysEx raw → [${bytesToHex(bytes)}]`, true, 'out');
     } catch (e) {
       addLog(`Falha: ${(e as Error).message}`, false);
     }
-  }, [getOutput, addLog, bank, preset]);
+  }, [getOutput, addLog, rawSysex]);
+
+  const sendPresetRequest = useCallback(() => {
+    const out = getOutput();
+    if (!out) {
+      addLog('Conecte um dispositivo de saída primeiro', false);
+      return;
+    }
+    const bytes = buildPresetRequest(presetReq);
+    try {
+      out.send(bytes);
+      addLog(`Solicitar Preset ${presetReq} → [${bytesToHex(bytes)}]`, true, 'out');
+    } catch (e) {
+      addLog(`Falha: ${(e as Error).message}`, false);
+    }
+  }, [getOutput, addLog, presetReq]);
 
   if (state === 'unsupported') {
     return (
@@ -441,7 +493,7 @@ export default function MidiRecovery() {
           <h3 className="text-white font-bold">Sequência de Destravamento</h3>
         </div>
         <p className="text-muted text-sm mb-4">
-          Executa 3 passos em sequência: (1) desliga todos os efeitos para aliviar o DSP, (2) força modo Preset, (3) carrega o Banco 01 / Preset A de fábrica.
+          Envia comandos SysEx Matribox em sequência: (1) solicita a lista de presets da Flash, (2) reseta o FileSystem de presets, (3) força entrada no modo bootloader/firmware.
         </p>
 
         <div className="space-y-2 mb-4">
@@ -469,54 +521,63 @@ export default function MidiRecovery() {
         </button>
       </div>
 
-      {/* Custom bank change */}
+      {/* SysEx preset requester */}
       <div className="rounded-2xl bg-surface border border-border p-5">
         <div className="flex items-center gap-2 mb-3">
           <RotateCcw className="w-5 h-5 text-primary-400" />
-          <h3 className="text-white font-bold">Trocar Banco/Preset Manual</h3>
+          <h3 className="text-white font-bold">Solicitar Preset (SysEx)</h3>
         </div>
         <p className="text-muted text-sm mb-4">
-          Se a sequência acima não funcionar, tente trocar para diferentes bancos/presets até encontrar um que não trave.
+          Envia um SysEx Matribox pedindo um preset específico da Flash. Se a pedaleira responder, o monitor mostrará os dados recebidos.
         </p>
-        <div className="flex gap-4 mb-4">
+        <div className="flex gap-3 mb-4 items-end">
           <div className="flex-1">
-            <label className="text-xs text-muted font-semibold uppercase tracking-wide block mb-1.5">Banco (1–64)</label>
+            <label className="text-xs text-muted font-semibold uppercase tracking-wide block mb-1.5">Número do Preset (0–127)</label>
             <input
-              type="range"
+              type="number"
               min={0}
-              max={63}
-              value={bank}
-              onChange={(e) => setBank(Number(e.target.value))}
-              className="w-full accent-primary-500"
+              max={127}
+              value={presetReq}
+              onChange={(e) => setPresetReq(Math.min(127, Math.max(0, Number(e.target.value))))}
+              className="w-full bg-bg-800 border border-border rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-primary-500/50 transition-colors"
             />
-            <span className="text-primary-400 text-sm font-mono">Banco {bank + 1}</span>
           </div>
-          <div className="flex-1">
-            <label className="text-xs text-muted font-semibold uppercase tracking-wide block mb-1.5">Preset</label>
-            <div className="flex gap-1">
-              {['A', 'B', 'C', 'D'].map((p, i) => (
-                <button
-                  key={p}
-                  onClick={() => setPreset(i)}
-                  className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
-                    preset === i
-                      ? 'bg-primary-500 text-bg-900'
-                      : 'bg-bg-800 text-muted hover:text-primary-400 border border-border'
-                  }`}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-          </div>
+          <button
+            onClick={sendPresetRequest}
+            disabled={state !== 'connected' || !selectedId}
+            className="px-5 py-2.5 rounded-xl bg-primary-500 text-bg-900 font-bold hover:bg-primary-400 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2 whitespace-nowrap"
+          >
+            <RotateCcw className="w-4 h-4" />
+            Solicitar
+          </button>
         </div>
+        <p className="text-primary-400/60 text-[10px] font-mono">{bytesToHex(buildPresetRequest(presetReq))}</p>
+      </div>
+
+      {/* Raw SysEx sender */}
+      <div className="rounded-2xl bg-surface border border-border p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <Terminal className="w-5 h-5 text-primary-400" />
+          <h3 className="text-white font-bold">Enviar SysEx Raw (hex)</h3>
+        </div>
+        <p className="text-muted text-sm mb-4">
+          Digite bytes hex diretamente para experimentar comandos SysEx. Formato Matribox: <code className="text-primary-400 font-mono">F0 21 25 4D 50 00 [cmd] [payload] F7</code>
+        </p>
+        <textarea
+          value={rawSysex}
+          onChange={(e) => setRawSysex(e.target.value)}
+          rows={3}
+          spellCheck={false}
+          className="w-full bg-bg-900 border border-border rounded-lg px-3 py-2.5 text-sm text-primary-300 font-mono focus:outline-none focus:border-primary-500/50 transition-colors resize-none"
+          placeholder="F0 21 25 4D 50 00 02 00 00 F7"
+        />
         <button
-          onClick={sendCustomBank}
+          onClick={sendRawSysex}
           disabled={state !== 'connected' || !selectedId}
-          className="w-full py-2.5 rounded-xl bg-primary-500 text-bg-900 font-bold hover:bg-primary-400 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+          className="mt-3 w-full py-2.5 rounded-xl bg-primary-500 text-bg-900 font-bold hover:bg-primary-400 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
         >
-          <RotateCcw className="w-4 h-4" />
-          Enviar CC0={bank} + PC={preset} ({bytesToHex(buildBankChange(bank, preset))})
+          <Terminal className="w-4 h-4" />
+          Enviar SysEx
         </button>
       </div>
 

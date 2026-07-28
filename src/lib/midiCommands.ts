@@ -1,136 +1,158 @@
+// Matribox II Pro MIDI commands — SysEx format.
+//
+// The pedalboard communicates exclusively via SysEx with this header:
+//   F0 21 25 4D 50 00 ...
+//   ^   ^  ^  ^  ^  ^
+//   |   |  |  |  |  Device ID (0x00 = default)
+//   |   |  |  |  Family code "P"
+//   |   |  |  Family code "M"
+//   |   |  Family code 0x25
+//   |   Manufacturer ID (1-byte: 0x21)
+//   SysEx start
+//
+// Response format (captured from real pedalboard):
+//   F0 21 25 4D 50 00 00 XX 00 22 [80 bytes preset data] F7
+//                          ^  ^  ^
+//                          |  |  Command type (0x22 = preset dump)
+//                          |  Preset number (middle byte of 3-byte field)
+//                          Preset number high byte
+//
+// Standard CC/PC messages (B0 xx yy / C0 xx) are IGNORED by the pedalboard.
+
 export interface MidiCommand {
   id: string;
   label: string;
   description: string;
   bytes: number[];
-  category: 'recover' | 'effect' | 'bank';
+  category: 'recover' | 'effect' | 'bank' | 'sysex';
 }
+
+// ── Matribox SysEx header ────────────────────────────────────────────────────
+
+export const SYSEX_START = 0xf0;
+export const SYSEX_END = 0xf7;
+export const MATRIBOX_MANUFACTURER = 0x21;
+export const MATRIBOX_FAMILY = [0x25, 0x4d, 0x50]; // "MP"
+export const MATRIBOX_DEVICE_ID = 0x00;
+
+// Known command IDs (from captured responses):
+// 0x22 = Preset dump response (pedalboard → host)
+// Request command IDs are best-effort guesses — adjust via raw sender if needed.
+export const CMD_PRESET_DUMP = 0x22;
+export const CMD_REQUEST_PRESET = 0x02; // guessed: request = response - 0x20
+export const CMD_REQUEST_PRESET_LIST = 0x03;
+export const CMD_RESET_FS = 0x7f; // guessed: universal reset
+export const CMD_DELETE_PRESET = 0x04;
+export const CMD_JUMP_FIRMWARE = 0x01; // HTJumpFirmwareEvent
+
+// ── SysEx builder ────────────────────────────────────────────────────────────
+
+export function buildSysex(commandId: number, payload: number[] = []): number[] {
+  return [
+    SYSEX_START,
+    MATRIBOX_MANUFACTURER,
+    ...MATRIBOX_FAMILY,
+    MATRIBOX_DEVICE_ID,
+    commandId,
+    ...payload,
+    SYSEX_END,
+  ];
+}
+
+export function buildPresetRequest(presetNumber: number): number[] {
+  // Format: F0 21 25 4D 50 00 [cmd] [preset_hi] [preset_lo] F7
+  // Preset number as 14-bit MIDI value split across two bytes.
+  const hi = (presetNumber >> 7) & 0x7f;
+  const lo = presetNumber & 0x7f;
+  return buildSysex(CMD_REQUEST_PRESET, [hi, lo]);
+}
+
+export function buildDeletePreset(presetNumber: number): number[] {
+  const hi = (presetNumber >> 7) & 0x7f;
+  const lo = presetNumber & 0x7f;
+  return buildSysex(CMD_DELETE_PRESET, [hi, lo]);
+}
+
+export function buildRawSysex(hexBytes: string): number[] {
+  const cleaned = hexBytes.trim().replace(/[^0-9a-fA-F\s]/g, '');
+  const tokens = cleaned.split(/\s+/).filter(Boolean);
+  const bytes: number[] = [];
+  for (const t of tokens) {
+    const n = parseInt(t, 16);
+    if (!Number.isNaN(n) && n >= 0 && n <= 0xff) {
+      bytes.push(n);
+    }
+  }
+  return bytes;
+}
+
+// ── Recovery sequence ────────────────────────────────────────────────────────
 
 export const RECOVERY_SEQUENCE: MidiCommand[] = [
   {
-    id: 'bypass-all',
-    label: 'Desligar todos os efeitos',
-    description: 'Envia CC43–CC54 = 0 para desligar os 12 blocos e aliviar o DSP imediatamente',
-    bytes: buildBypassAll(),
+    id: 'request-preset-list',
+    label: 'Solicitar lista de presets',
+    description: 'Envia SysEx CMD_REQUEST_PRESET_LIST (0x03) — pede à pedaleira a lista completa de presets da Flash',
+    bytes: buildSysex(CMD_REQUEST_PRESET_LIST),
     category: 'recover',
   },
   {
-    id: 'preset-mode',
-    label: 'Forçar modo Preset',
-    description: 'CC29 = 64 — garante que a pedaleira saia do modo Tuner/Looper e volte para Preset',
-    bytes: [0xb0, 29, 64],
+    id: 'reset-fs',
+    label: 'Reset do FileSystem de presets',
+    description: 'Envia SysEx CMD_RESET_FS (0x7F) — reseta toda a estrutura de presets na Flash (resetFS do firmware)',
+    bytes: buildSysex(CMD_RESET_FS),
     category: 'recover',
   },
   {
-    id: 'bank-01-preset-a',
-    label: 'Trocar para Banco 01 / Preset A',
-    description: 'CC0 = 0 (banco) + Program Change 0 — carrega o primeiro preset de fábrica',
-    bytes: [0xb0, 0, 0, 0xc0, 0],
-    category: 'bank',
+    id: 'jump-firmware',
+    label: 'Forçar modo Firmware (bootloader)',
+    description: 'Envia SysEx CMD_JUMP_FIRMWARE (0x01) — equivalente ao HTJumpFirmwareEvent, força a pedaleira a entrar no modo bootloader',
+    bytes: buildSysex(CMD_JUMP_FIRMWARE),
+    category: 'recover',
   },
 ];
 
+// ── Individual SysEx commands ─────────────────────────────────────────────────
+
 export const INDIVIDUAL_COMMANDS: MidiCommand[] = [
   {
-    id: 'bypass-comp',
-    label: 'Desligar Compressor',
-    description: 'CC43 = 0',
-    bytes: [0xb0, 43, 0],
+    id: 'delete-preset-0',
+    label: 'Deletar Preset 0',
+    description: 'SysEx CMD_DELETE_PRESET (0x04) preset 0',
+    bytes: buildDeletePreset(0),
     category: 'effect',
   },
   {
-    id: 'bypass-drive',
-    label: 'Desligar Drive',
-    description: 'CC44 = 0',
-    bytes: [0xb0, 44, 0],
+    id: 'delete-preset-1',
+    label: 'Deletar Preset 1',
+    description: 'SysEx CMD_DELETE_PRESET (0x04) preset 1',
+    bytes: buildDeletePreset(1),
     category: 'effect',
   },
   {
-    id: 'bypass-amp',
-    label: 'Desligar Amp',
-    description: 'CC45 = 0',
-    bytes: [0xb0, 45, 0],
+    id: 'request-preset-0',
+    label: 'Solicitar Preset 0',
+    description: 'SysEx CMD_REQUEST_PRESET (0x02) preset 0',
+    bytes: buildPresetRequest(0),
     category: 'effect',
   },
   {
-    id: 'bypass-cab',
-    label: 'Desligar Cab',
-    description: 'CC46 = 0',
-    bytes: [0xb0, 46, 0],
-    category: 'effect',
-  },
-  {
-    id: 'bypass-eq',
-    label: 'Desligar EQ',
-    description: 'CC47 = 0',
-    bytes: [0xb0, 47, 0],
-    category: 'effect',
-  },
-  {
-    id: 'bypass-mod',
-    label: 'Desligar Mod',
-    description: 'CC48 = 0',
-    bytes: [0xb0, 48, 0],
-    category: 'effect',
-  },
-  {
-    id: 'bypass-delay',
-    label: 'Desligar Delay',
-    description: 'CC49 = 0',
-    bytes: [0xb0, 49, 0],
-    category: 'effect',
-  },
-  {
-    id: 'bypass-reverb',
-    label: 'Desligar Reverb',
-    description: 'CC50 = 0',
-    bytes: [0xb0, 50, 0],
-    category: 'effect',
-  },
-  {
-    id: 'bypass-wah',
-    label: 'Desligar Wah',
-    description: 'CC51 = 0',
-    bytes: [0xb0, 51, 0],
-    category: 'effect',
-  },
-  {
-    id: 'bypass-freq',
-    label: 'Desligar Freq',
-    description: 'CC52 = 0',
-    bytes: [0xb0, 52, 0],
-    category: 'effect',
-  },
-  {
-    id: 'bypass-vol',
-    label: 'Desligar Volume',
-    description: 'CC53 = 0',
-    bytes: [0xb0, 53, 0],
-    category: 'effect',
-  },
-  {
-    id: 'bypass-dyn',
-    label: 'Desligar Dynamics',
-    description: 'CC54 = 0',
-    bytes: [0xb0, 54, 0],
+    id: 'request-preset-1',
+    label: 'Solicitar Preset 1',
+    description: 'SysEx CMD_REQUEST_PRESET (0x02) preset 1',
+    bytes: buildPresetRequest(1),
     category: 'effect',
   },
 ];
 
 export const ALL_COMMANDS = [...RECOVERY_SEQUENCE, ...INDIVIDUAL_COMMANDS];
 
-function buildBypassAll(): number[] {
-  const bytes: number[] = [];
-  for (let cc = 43; cc <= 54; cc++) {
-    bytes.push(0xb0, cc, 0);
-  }
-  return bytes;
-}
-
-export function buildBankChange(bank: number, preset: number): number[] {
-  return [0xb0, 0, bank & 0x7f, 0xc0, preset & 0x7f];
-}
+// ── Utilities ──────────────────────────────────────────────────────────────────
 
 export function bytesToHex(bytes: number[]): string {
   return bytes.map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+}
+
+export function hexToBytes(hex: string): number[] {
+  return buildRawSysex(hex);
 }
