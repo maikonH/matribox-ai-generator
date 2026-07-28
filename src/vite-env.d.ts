@@ -26,8 +26,28 @@ interface MIDIOutput {
   state: 'connected' | 'disconnected';
 }
 
+interface MIDIInput {
+  id: string;
+  name?: string;
+  onmidimessage: ((this: MIDIInput, ev: MIDIMessageEvent) => void) | null;
+  open(): Promise<MIDIInput>;
+  close(): Promise<MIDIInput>;
+  connection: 'open' | 'closed' | 'pending';
+  state: 'connected' | 'disconnected';
+}
+
+interface MIDIMessageEvent extends Event {
+  data: Uint8Array;
+  receivedTime?: number;
+  srcElement?: any;
+}
+
 interface MIDIInputMap {
-  forEach(callback: (value: unknown, key: string) => void): void;
+  forEach(callback: (value: MIDIInput, key: string) => void): void;
+  get(key: string): MIDIInput | undefined;
+  entries(): IterableIterator<[string, MIDIInput]>;
+  keys(): IterableIterator<string>;
+  values(): IterableIterator<MIDIInput>;
   size: number;
 }
 
