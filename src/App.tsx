@@ -1,9 +1,11 @@
 import { useState, useCallback, useRef } from 'react';
+import { Music, Usb } from 'lucide-react';
 import Header from './components/Header';
 import SettingsDrawer from './components/SettingsDrawer';
 import PromptBar from './components/PromptBar';
 import PresetCard from './components/PresetCard';
 import ToastContainer from './components/ToastContainer';
+import MidiRecovery from './components/MidiRecovery';
 import { useToasts } from './hooks/useToasts';
 import { loadAlgorithms, setDevOverlay } from './lib/algorithmStore';
 import { ALGORITHM_COUNT } from './lib/algorithmCatalog';
@@ -20,6 +22,7 @@ export default function App() {
   const [builtPreset, setBuiltPreset] = useState<BuiltPreset | null>(null);
   const [loading, setLoading] = useState(false);
   const { toasts, showToast, dismiss } = useToasts();
+  const [view, setView] = useState<'preset' | 'recovery'>('preset');
 
   const runGeneration = useCallback(
     (promptText: string, merged: Algorithm[]) => {
@@ -101,32 +104,60 @@ export default function App() {
     <div className="min-h-screen bg-bg-900 text-slate-200">
       <Header algCount={ALGORITHM_COUNT} onOpenSettings={() => setSettingsOpen(true)} />
 
-      <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        <div className="space-y-3">
-          <div className="text-center">
-            <h2 className="text-white font-bold text-2xl sm:text-3xl tracking-tight">
-              Gerar Preset por IA
-            </h2>
-            <p className="text-slate-400 text-sm mt-1">
-              Descreva o som e a IA monta a cadeia de sinal completa
-            </p>
-          </div>
-          <PromptBar
-            value={prompt}
-            onChange={setPrompt}
-            onSubmit={handleGenerate}
-            loading={loading}
-            onQuickPrompt={handleQuickPrompt}
-          />
+      <main className={`mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 ${view === 'preset' ? 'max-w-3xl' : 'max-w-2xl'}`}>
+        {/* Tab toggle */}
+        <div className="flex gap-2 p-1 bg-surface rounded-xl border border-border w-fit mx-auto">
+          <button
+            onClick={() => setView('preset')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+              view === 'preset' ? 'bg-primary-500 text-bg-900' : 'text-muted hover:text-primary-400'
+            }`}
+          >
+            <Music className="w-4 h-4" />
+            Gerador de Presets
+          </button>
+          <button
+            onClick={() => setView('recovery')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+              view === 'recovery' ? 'bg-warning-500 text-bg-900' : 'text-muted hover:text-warning-400'
+            }`}
+          >
+            <Usb className="w-4 h-4" />
+            Recovery MIDI
+          </button>
         </div>
 
-        <PresetCard
-          preset={preset}
-          loading={loading}
-          onParamChange={handleParamChange}
-          onDownload={handleDownload}
-          canDownload={!!builtPreset}
-        />
+        {view === 'preset' && (
+          <div className="space-y-8">
+            <div className="space-y-3">
+              <div className="text-center">
+                <h2 className="text-white font-bold text-2xl sm:text-3xl tracking-tight">
+                  Gerar Preset por IA
+                </h2>
+                <p className="text-slate-400 text-sm mt-1">
+                  Descreva o som e a IA monta a cadeia de sinal completa
+                </p>
+              </div>
+              <PromptBar
+                value={prompt}
+                onChange={setPrompt}
+                onSubmit={handleGenerate}
+                loading={loading}
+                onQuickPrompt={handleQuickPrompt}
+              />
+            </div>
+
+            <PresetCard
+              preset={preset}
+              loading={loading}
+              onParamChange={handleParamChange}
+              onDownload={handleDownload}
+              canDownload={!!builtPreset}
+            />
+          </div>
+        )}
+
+        {view === 'recovery' && <MidiRecovery />}
       </main>
 
       <SettingsDrawer
