@@ -285,8 +285,12 @@ export default function MidiRecovery() {
         return;
       }
       try {
-        out.send(cmd.bytes);
-        addLog(`${cmd.label} → [${bytesToHex(cmd.bytes)}]`, true, 'out');
+        out.open().then(() => {
+          out.send(new Uint8Array(cmd.bytes));
+          addLog(`${cmd.label} → [${bytesToHex(cmd.bytes)}]`, true, 'out');
+        }).catch((e) => {
+          addLog(`Erro ao abrir saída: ${(e as Error).message}`, false);
+        });
       } catch (e) {
         addLog(`Falha: ${cmd.label} — ${(e as Error).message}`, false);
       }
@@ -302,9 +306,16 @@ export default function MidiRecovery() {
     }
     setBusy(true);
     addLog('Iniciando sequência de destravamento...', true, 'out');
+    try {
+      await out.open();
+    } catch (e) {
+      addLog(`Erro ao abrir saída: ${(e as Error).message}`, false);
+      setBusy(false);
+      return;
+    }
     for (const cmd of RECOVERY_SEQUENCE) {
       try {
-        out.send(cmd.bytes);
+        out.send(new Uint8Array(cmd.bytes));
         addLog(`${cmd.label} → enviado`, true, 'out');
         await sleep(300);
       } catch (e) {
@@ -327,8 +338,12 @@ export default function MidiRecovery() {
       return;
     }
     try {
-      out.send(bytes);
-      addLog(`SysEx raw → [${bytesToHex(bytes)}]`, true, 'out');
+      out.open().then(() => {
+        out.send(new Uint8Array(bytes));
+        addLog(`SysEx raw → [${bytesToHex(bytes)}]`, true, 'out');
+      }).catch((e) => {
+        addLog(`Erro ao abrir saída: ${(e as Error).message}`, false);
+      });
     } catch (e) {
       addLog(`Falha: ${(e as Error).message}`, false);
     }
@@ -342,8 +357,12 @@ export default function MidiRecovery() {
     }
     const bytes = buildPresetRequest(presetReq);
     try {
-      out.send(bytes);
-      addLog(`Solicitar Preset ${presetReq} → [${bytesToHex(bytes)}]`, true, 'out');
+      out.open().then(() => {
+        out.send(new Uint8Array(bytes));
+        addLog(`Solicitar Preset ${presetReq} → [${bytesToHex(bytes)}]`, true, 'out');
+      }).catch((e) => {
+        addLog(`Erro ao abrir saída: ${(e as Error).message}`, false);
+      });
     } catch (e) {
       addLog(`Falha: ${(e as Error).message}`, false);
     }
