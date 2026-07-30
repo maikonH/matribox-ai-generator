@@ -1,7 +1,7 @@
 import type { GeneratedPreset } from '../lib/types';
-import type { MidiCCCommand } from '../lib/midiBuilder';
+import type { MidiCommand } from '../lib/midiBuilder';
 import SignalChain from './SignalChain';
-import { Music2, Volume2, Layers, Loader2, Usb, CheckCircle2, Radio } from 'lucide-react';
+import { Music2, Volume2, Layers, Loader2, Usb, CheckCircle2, Radio, Zap } from 'lucide-react';
 
 interface Props {
   preset: GeneratedPreset | null;
@@ -10,7 +10,7 @@ interface Props {
   injected: boolean;
   onParamChange: (moduleIndex: number, paramIndex: number, value: number) => void;
   onReinject: () => void;
-  midiCommands: MidiCCCommand[];
+  midiCommands: MidiCommand[];
 }
 
 export default function PresetCard({
@@ -124,23 +124,34 @@ export default function PresetCard({
         )}
       </div>
 
-      {/* MIDI CC activity log */}
+      {/* MIDI command activity log */}
       {midiCommands.length > 0 && (
         <div className="rounded-2xl bg-bg-900 border border-border p-4">
           <div className="flex items-center gap-2 mb-3">
             <Radio className="w-4 h-4 text-primary-400" />
             <h3 className="text-muted text-xs font-bold uppercase tracking-wide">
-              Comandos MIDI CC enviados ({midiCommands.length})
+              Comandos MIDI enviados ({midiCommands.length})
             </h3>
           </div>
-          <div className="space-y-1 max-h-40 overflow-y-auto font-mono text-xs">
-            {midiCommands.map((cmd, i) => (
-              <div key={i} className="flex items-center gap-3 py-0.5">
-                <span className="text-primary-400 w-20 shrink-0">CC{cmd.cc}</span>
-                <span className="text-slate-300 w-10 shrink-0 tabular-nums">{cmd.value}</span>
-                <span className="text-muted truncate">{cmd.label}</span>
-              </div>
-            ))}
+          <div className="space-y-1 max-h-48 overflow-y-auto font-mono text-xs">
+            {midiCommands.map((cmd, i) =>
+              cmd.type === 'sysex' ? (
+                <div key={i} className="flex items-center gap-3 py-0.5">
+                  <span className="text-amber-400 w-20 shrink-0 flex items-center gap-1">
+                    <Zap className="w-3 h-3" />
+                    SysEx
+                  </span>
+                  <span className="text-slate-500 w-10 shrink-0 tabular-nums">{cmd.bytes.length}B</span>
+                  <span className="text-muted truncate">{cmd.label}</span>
+                </div>
+              ) : (
+                <div key={i} className="flex items-center gap-3 py-0.5">
+                  <span className="text-primary-400 w-20 shrink-0">CC{cmd.cc}</span>
+                  <span className="text-slate-300 w-10 shrink-0 tabular-nums">{cmd.value}</span>
+                  <span className="text-muted truncate">{cmd.label}</span>
+                </div>
+              ),
+            )}
           </div>
         </div>
       )}

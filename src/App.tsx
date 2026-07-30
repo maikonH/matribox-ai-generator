@@ -9,8 +9,8 @@ import { useToasts } from './hooks/useToasts';
 import { loadAlgorithms, setDevOverlay } from './lib/algorithmStore';
 import { ALGORITHM_COUNT } from './lib/algorithmCatalog';
 import { generatePreset, aiResponseToPreset } from './lib/gemini';
-import { buildMidiPreset, type BuiltMidiPreset, type MidiCCCommand } from './lib/midiBuilder';
-import { connectMatribox, sendCCBatch, getOutput } from './lib/midiSender';
+import { buildMidiPreset, type BuiltMidiPreset, type MidiCommand } from './lib/midiBuilder';
+import { connectMatribox, sendCC, sendSysEx, getOutput } from './lib/midiSender';
 import type { Algorithm, GeneratedPreset } from './lib/types';
 
 export default function App() {
@@ -18,7 +18,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [preset, setPreset] = useState<GeneratedPreset | null>(null);
-  const [midiCommands, setMidiCommands] = useState<MidiCCCommand[]>([]);
+  const [midiCommands, setMidiCommands] = useState<MidiCommand[]>([]);
   const [loading, setLoading] = useState(false);
   const [injecting, setInjecting] = useState(false);
   const [injected, setInjected] = useState(false);
@@ -52,7 +52,14 @@ export default function App() {
           output = await connectMatribox();
           showToast('Conectado à Matribox II Pro via USB', 'success');
         }
-        await sendCCBatch(output, built.commands);
+        for (const cmd of built.commands) {
+          if (cmd.type === 'sysex') {
+            sendSysEx(output, cmd.bytes);
+          } else {
+            sendCC(output, cmd.cc, cmd.value);
+          }
+          await new Promise((r) => setTimeout(r, 25));
+        }
         setInjected(true);
         showToast(`Timbre "${built.nomePatch}" injetado em tempo real!`, 'success');
       } catch (e) {

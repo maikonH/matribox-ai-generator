@@ -60,6 +60,11 @@ export function sendCC(output: MIDIOutput, cc: number, value: number): void {
   output.send([0xb0, cc, clamped]);
 }
 
+/** Send a raw SysEx message (bytes must already include F0 … F7). */
+export function sendSysEx(output: MIDIOutput, bytes: number[]): void {
+  output.send(bytes);
+}
+
 /** Send a batch of CC messages with a small delay between each. */
 export async function sendCCBatch(
   output: MIDIOutput,
