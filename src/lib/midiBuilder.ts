@@ -1,26 +1,29 @@
 // Matribox II Pro real-time MIDI builder.
 //
 // The pedalboard cannot instantiate an effect into an empty block via CC alone.
-// Before any CC parameter automation, we must push a raw SysEx model-load
-// packet (LEN=108, DATA8=48) that tells the firmware which algorithm to load
+// Before any CC parameter automation, we must push a raw SysEx data-write
+// packet (LEN=108) that tells the QME-200 firmware which algorithm to load
 // into the target block slot. Only then do CC parameter changes and the block
 // activation (CC43..CC54 = 127) take effect and light up the pedal.
 //
-// SysEx model-load packet structure (108 bytes total, reverse-engineered
-// from app.so):
+// SysEx data-write packet structure (108 bytes total):
 //
 //  Offset  Content
 //  ------  -------
-//  0–3     [0xF0, 0x00, 0x01, 0x3A]  Sonicake manufacturer signature
-//  4       Command opcode  (0x06 = switch/load effect model)
-//  5       Block slot index (0–11)
-//  6       Flags / reserved (0x01 = apply immediately)
-//  7–57    Standard template padding (zeros)
-//  58      Effect category ID  (fxid >>> 24)
-//  59      Effect model ID — low 7 bits  (fxid & 0x7F)
-//  60      Effect model ID — high 7 bits ((fxid >>> 7) & 0x7F)
-//  61–105  Padding (zeros)
-//  106     Checksum  (XOR of bytes 4–105, masked to 7 bits)
+//  0–7     [0xF0, 0x00, 0x01, 0x3A, 0x01, 0x10, 0x02, 0x40]
+//          Sonicake manufacturer id + QME-200 hardware family + data-write op.
+//          The first 4 bytes are the manufacturer signature; bytes 4–7 are the
+//          device-family and write-operation selectors the firmware gates on —
+//          a bare 4-byte header is rejected, which is why the previous model
+//          loads were silently ignored.
+//  8       Block slot index (0–11)
+//  9       Flags (0x01 = apply immediately)
+//  10–13   Effect model ID as four 7-bit bytes (LSB first). The FULL fxid from
+//          alg_data.json is split into 7-bit chunks so the high category bits
+//          (fxid >>> 21) survive — the old 2-byte split only carried bits 0–13
+//          and emitted model=0x0000 for every AMP/CAB (fxid ≥ 0x01000000).
+//  14–105  Template padding (zeros)
+//  106     Checksum (XOR of bytes 8–105, masked to 7 bits)
 //  107     0xF7  SysEx terminator
 //
 // CC map (official reverse-engineering of the hardware):
@@ -29,13 +32,18 @@
 //   CC43..CC54 — Ativação dos blocos 1..12 (0 = OFF, 127 = ON)
 //   CC16, CC18, CC20 — Knobs rápidos 1, 2, 3 (0–127)
 //
-// Flow per block:
-//   1. SysEx model-load (108 bytes) → loads the algorithm into the block slot
-//   2. CC parameter changes → sets knob values
-//   3. CC activation (127) → lights up the block pedal
+// Flow per block (active AND empty):
+//   1. SysEx data-write (108 bytes) → commits the model id into the block slot
+//   2. 80 ms delay (firmware processes the write)
+//   3. CC parameter changes → sets knob values (active blocks only)
+//   4. CC activation (127) → lights up the block pedal
 //
-// Timing: the firmware needs ~80 ms after a SysEx model-load before it will
-// accept CC commands for that block. CC commands use a shorter 25 ms gap.
+// Empty blocks are NOT skipped: they receive the same write handshake with a
+// null model id followed by CC 127, which forces the chip to render the slot
+// instead of leaving it in the uninitialized state that hangs "Loading data…".
+//
+// Timing: the firmware needs ~80 ms after a SysEx write before it will accept
+// CC commands for that block. CC commands use a shorter 25 ms gap.
 
 import { findSlotForCode, HARDWARE_SLOTS } from './hardwareSlots';
 import type { AiPresetResponse, ChainEntry } from './presetBuilder';
@@ -72,23 +80,23 @@ export const CC_BLOCK_COUNT = 12;
 export const CC_KNOB = [16, 18, 20]; // quick knobs 1, 2, 3
 
 const BLOCK_ON = 127;
-const BLOCK_OFF = 0;
 
 // ── SysEx constants ──────────────────────────────────────────────────────────
 
-const SYSEX_HEADER = [0xf0, 0x00, 0x01, 0x3a];
+// 8-byte QME-200 write header: manufacturer id (F0 00 01 3A) + hardware family
+// (01 10) + data-write operation (02 40). The firmware rejects any packet whose
+// header is shorter than this — the root cause of the ignored model loads.
+const SYSEX_HEADER = [0xf0, 0x00, 0x01, 0x3a, 0x01, 0x10, 0x02, 0x40];
+const SYSEX_HEADER_LEN = SYSEX_HEADER.length; // 8
 const SYSEX_TERMINATOR = 0xf7;
 const SYSEX_PACKET_LEN = 108;
-const SYSEX_CMD_SWITCH_EFFECT = 0x06;
 const SYSEX_FLAG_IMMEDIATE = 0x01;
 
-// Offsets within the full 108-byte packet.
-const OFFSET_CMD = 4;
-const OFFSET_SLOT = 5;
-const OFFSET_FLAGS = 6;
-const OFFSET_CATEGORY = 58;
-const OFFSET_MODEL_LO = 59;
-const OFFSET_MODEL_HI = 60;
+// Offsets within the 108-byte packet (payload starts right after the 8-byte header).
+const OFFSET_SLOT = SYSEX_HEADER_LEN;           // 8
+const OFFSET_FLAGS = SYSEX_HEADER_LEN + 1;      // 9
+const OFFSET_MODEL_BASE = SYSEX_HEADER_LEN + 2; // 10
+const SYSEX_MODEL_BYTES = 4;                    // 4 × 7 bits = 28 bits (covers fxid up to 0x0FFFFFFF)
 const OFFSET_CHECKSUM = 106;
 
 // Delays (ms) between sent messages.
@@ -115,68 +123,85 @@ function to7Bit(value: number): number {
 }
 
 /**
- * Compute the SysEx checksum: XOR of all bytes from OFFSET_CMD through
- * OFFSET_CHECKSUM - 1, masked to 7 bits.
+ * Compute the SysEx checksum: XOR of every payload byte from the end of the
+ * 8-byte header through OFFSET_CHECKSUM - 1, masked to 7 bits.
  */
 function sysexChecksum(packet: number[]): number {
   let xor = 0;
-  for (let i = OFFSET_CMD; i < OFFSET_CHECKSUM; i++) {
+  for (let i = SYSEX_HEADER_LEN; i < OFFSET_CHECKSUM; i++) {
     xor ^= packet[i];
   }
   return xor & 0x7f;
 }
 
 /**
- * Build a 108-byte SysEx model-load packet for a given effect.
+ * Split the full fxid from alg_data.json into four 7-bit bytes, LSB first.
+ * This carries the high category bits (fxid >>> 21) that the old 2-byte split
+ * discarded — AMP/CAB effects with fxid ≥ 0x01000000 previously encoded as
+ * model=0x0000 and were ignored by the firmware.
+ */
+function fxidTo7BitBytes(fxid: number): number[] {
+  const out: number[] = [];
+  let v = fxid >>> 0;
+  for (let i = 0; i < SYSEX_MODEL_BYTES; i++) {
+    out.push(to7Bit(v));
+    v = v >>> 7;
+  }
+  return out;
+}
+
+/**
+ * Build a 108-byte SysEx data-write packet for a given effect (or a null model
+ * for an empty slot). The 8-byte QME-200 write header is mandatory; without it
+ * the firmware silently drops the packet.
  *
  * Layout:
- *   [0–3]   F0 00 01 3A          Sonicake header
- *   [4]     0x06                  Command: switch/load effect
- *   [5]     blockIndex            Target block slot (0–11)
- *   [6]     0x01                  Flag: apply immediately
- *   [7–57]  zeros                 Template padding
- *   [58]    category              fxid >>> 24
- *   [59]    modelLo               fxid & 0x7F  (7-bit)
- *   [60]    modelHi               (fxid >>> 7) & 0x7F  (7-bit)
- *   [61–105] zeros                Padding
- *   [106]   checksum              XOR of bytes 4–105
- *   [107]   F7                    Terminator
+ *   [0–7]   F0 00 01 3A 01 10 02 40   QME-200 write header
+ *   [8]     blockIndex                Target block slot (0–11)
+ *   [9]     0x01                      Flag: apply immediately
+ *   [10–13] model[0..3]               Full fxid as four 7-bit bytes (LSB first)
+ *   [14–105] zeros                    Template padding
+ *   [106]   checksum                  XOR of bytes 8–105
+ *   [107]   F7                        Terminator
  */
 function buildModelLoadSysEx(
   blockIndex: number,
   fxid: number,
   effectName: string,
 ): MidiSysExCommand {
-  const category = (fxid >>> 24) & 0xff;
-  const modelLo = to7Bit(fxid);
-  const modelHi = to7Bit(fxid >>> 7);
+  const modelBytes = fxidTo7BitBytes(fxid);
 
   // Start with a zero-filled 108-byte buffer.
   const packet = new Array<number>(SYSEX_PACKET_LEN).fill(0);
 
-  // Header
-  packet[0] = SYSEX_HEADER[0];
-  packet[1] = SYSEX_HEADER[1];
-  packet[2] = SYSEX_HEADER[2];
-  packet[3] = SYSEX_HEADER[3];
+  // 8-byte QME-200 write header.
+  for (let i = 0; i < SYSEX_HEADER_LEN; i++) {
+    packet[i] = SYSEX_HEADER[i];
+  }
 
-  // Command structure
-  packet[OFFSET_CMD] = SYSEX_CMD_SWITCH_EFFECT;
+  // Slot + apply-immediately flag.
   packet[OFFSET_SLOT] = to7Bit(blockIndex);
   packet[OFFSET_FLAGS] = SYSEX_FLAG_IMMEDIATE;
 
-  // Category and model IDs at the protocol-defined offsets
-  packet[OFFSET_CATEGORY] = to7Bit(category);
-  packet[OFFSET_MODEL_LO] = modelLo;
-  packet[OFFSET_MODEL_HI] = modelHi;
+  // Full fxid as 7-bit MSB/LSB (LSB first) — no dummy zeros; the high category
+  // bits are carried in modelBytes[3].
+  for (let i = 0; i < modelBytes.length; i++) {
+    packet[OFFSET_MODEL_BASE + i] = modelBytes[i];
+  }
 
-  // Checksum + terminator
+  // Checksum + terminator.
   packet[OFFSET_CHECKSUM] = sysexChecksum(packet);
   packet[SYSEX_PACKET_LEN - 1] = SYSEX_TERMINATOR;
 
+  const modelHex = modelBytes
+    .slice()
+    .reverse()
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+
   return {
     bytes: packet,
-    label: `SysEx modelo: bloco ${blockIndex + 1} ← ${effectName} (cat=${category}, model=0x${modelHi.toString(16).padStart(2, '0')}${modelLo.toString(16).padStart(2, '0')})`,
+    label: `SysEx escrita QME-200: bloco ${blockIndex + 1} ← ${effectName} (fxid=${fxid}, model=0x${modelHex})`,
   };
 }
 
@@ -238,15 +263,15 @@ export function buildMidiPreset(ai: AiPresetResponse): BuiltMidiPreset {
 
     if (entry) {
       // The real FXID resolved from alg_data.json during validation — injected
-      // directly into SysEx bytes 59 (low 7 bits) and 60 (high 7 bits).
+      // directly into SysEx bytes 10–13 as four 7-bit bytes (full fxid).
       const fxid = entry.fxid!;
 
-      // 1. SysEx model-load — injects the FXID into the block slot so the
+      // 1. SysEx data-write — commits the FXID into the block slot so the
       //    firmware loads the right algorithm before any CC takes effect.
       const sysex = buildModelLoadSysEx(i, fxid, entry.nomeEfeito);
       commands.push({ type: 'sysex', ...sysex });
       // ↑ sender applies DELAY_SYSEX (80 ms) here, giving the firmware time to
-      //   process the model load before the CC commands below arrive.
+      //   process the write before the CC commands below arrive.
 
       // 2. CC parameter changes (only the first 3 blocks expose a quick knob
       //    on CC16/CC18/CC20). Sender applies DELAY_CC (25 ms) after each.
@@ -269,12 +294,20 @@ export function buildMidiPreset(ai: AiPresetResponse): BuiltMidiPreset {
         label: `Ativar bloco ${i + 1} (${entry.nomeEfeito}) → CC${cc} = 127`,
       });
     } else {
-      // Unused block: explicitly turn it OFF.
+      // Empty slot: push the full QME-200 write handshake with a null model so
+      // the chip commits the slot instead of ignoring a bare CC. The 80 ms
+      // SysEx delay (applied by the sender) precedes the CC 127 "snap" that
+      // forces the pedal to render on screen — this is what unblocks the
+      // "preset vazio / Loading data…" hang.
+      commands.push({
+        type: 'sysex',
+        ...buildModelLoadSysEx(i, 0, 'Slot vazio'),
+      });
       commands.push({
         type: 'cc',
         cc,
-        value: BLOCK_OFF,
-        label: `Desativar bloco ${i + 1} → CC${cc} = 0`,
+        value: BLOCK_ON,
+        label: `Forçar render bloco ${i + 1} (slot vazio) → CC${cc} = 127`,
       });
     }
   }
