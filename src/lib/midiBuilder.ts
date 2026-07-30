@@ -23,9 +23,40 @@
 //              positions are 0. Empty slots are fully zeroed.
 // The XOR checksum covers the 96-byte matrix; F7 terminates the message.
 
-import { findSlotForCode, HARDWARE_SLOTS } from './hardwareSlots';
+import { findSlotForCode, HARDWARE_SLOTS, type HardwareSlot } from './hardwareSlots';
 import type { AiPresetResponse, ChainEntry } from './presetBuilder';
 import { toUsbMidiBlocks, formatBlocksHex } from './midiSender';
+
+// ── Matrix geometry (defined first so the Slot Table can use them) ────────────
+//
+// The 96-byte parameter matrix is 12 slots × 8 bytes. Per slot: 4 FXID bytes
+// (LSB-first 7-bit packing of the full 28-bit fxid from alg_data.json) + 4 knob
+// bytes (0–100 → 0–127). Empty slots are fully zeroed.
+const SLOT_BYTES = 8;
+const FXID_BYTES = 4;
+const KNOB_BYTES = 4;
+
+// ── Slot Table — single source of truth for slot → byte offset ─────────────────
+//
+// The first 10 slots map 1:1 to the physical hardware slots defined in
+// hardwareSlots.ts (DYN→VOL); the matrix's last 2 slots are firmware-reserved
+// padding and stay zeroed. Deriving offsets here means a slot reordering or
+// addition is a one-line change in hardwareSlots.ts — the builder recalculates
+// every offset automatically via index × SLOT_BYTES.
+
+interface SlotTableEntry {
+  slot: HardwareSlot;
+  /** Byte offset of this slot's 8-byte block within the 96-byte matrix. */
+  offset: number;
+}
+
+export const SLOT_TABLE: SlotTableEntry[] = HARDWARE_SLOTS.map((slot, index) => ({
+  slot,
+  offset: index * SLOT_BYTES,
+}));
+
+/** Number of physical hardware slots (10) — the rest of the 12-slot matrix is padding. */
+export const HARDWARE_SLOT_COUNT = SLOT_TABLE.length;
 
 // ── Command types ─────────────────────────────────────────────────────────────
 
@@ -82,10 +113,7 @@ const SYSEX_TERMINATOR = 0xf7;
 
 // 12 slots × 8 bytes (4 fxid + 4 knobs) = 96 bytes of slot data.
 const SLOT_COUNT = CC_BLOCK_COUNT; // 12
-const SLOT_BYTES = 8;
 const MATRIX_BYTES = SLOT_COUNT * SLOT_BYTES; // 96
-const FXID_BYTES = 4;
-const KNOB_BYTES = 4;
 
 // Total SysEx length = signature(6) + matrix(96) + checksum(1) + F7(1) = 104.
 // 104 ≡ 2 (mod 3), so the USB-MIDI tail packet is CIN 0x06 ([b, F7, 00]).
@@ -134,31 +162,34 @@ function matrixChecksum(matrix: number[]): number {
 }
 
 /**
- * Assemble the 96-byte parameter matrix from the validated chain. Active
- * modules fill consecutive slots in signal-chain order; the remaining slots
- * are zeroed so the firmware renders them as empty blocks instead of leaving
- * stale algorithms in RAM.
+ * Assemble the 96-byte parameter matrix from the validated chain. Each chain
+ * entry is routed to its hardware slot's fixed byte offset (looked up via
+ * SLOT_TABLE), so a Drive block always lands at slot 3 (byte 24) regardless of
+ * its position in the AI's cadeia array. Slots with no matching chain entry
+ * stay zeroed, which the firmware renders as an empty/bypassed block.
  */
 function buildParameterMatrix(entries: ChainEntry[]): number[] {
   const matrix = new Array<number>(MATRIX_BYTES).fill(0);
 
-  for (let slot = 0; slot < SLOT_COUNT; slot++) {
-    const entry = entries[slot];
-    const base = slot * SLOT_BYTES;
+  for (const entry of entries) {
+    if (entry.fxid === undefined) continue;
 
-    if (entry && entry.fxid !== undefined) {
-      const fxidBytes = fxidTo7BitBytes(entry.fxid);
-      for (let i = 0; i < FXID_BYTES; i++) {
-        matrix[base + i] = fxidBytes[i];
-      }
-      // Up to four knob values, mapped to 0–127.
-      for (let i = 0; i < KNOB_BYTES; i++) {
-        const knob = entry.knobs[i];
-        matrix[base + FXID_BYTES + i] =
-          knob !== undefined ? toMidiRange(knob) : 0;
-      }
+    const slotEntry = SLOT_TABLE.find(
+      (st) => st.slot.code === findSlotForCode(entry.modulo)?.code,
+    );
+    if (!slotEntry) continue;
+
+    const base = slotEntry.offset;
+
+    const fxidBytes = fxidTo7BitBytes(entry.fxid);
+    for (let i = 0; i < FXID_BYTES; i++) {
+      matrix[base + i] = fxidBytes[i];
     }
-    // Empty slots stay zeroed — no explicit branch needed.
+    for (let i = 0; i < KNOB_BYTES; i++) {
+      const knob = entry.knobs[i];
+      matrix[base + FXID_BYTES + i] =
+        knob !== undefined ? toMidiRange(knob) : 0;
+    }
   }
 
   return matrix;
@@ -256,13 +287,31 @@ export function buildMidiPreset(ai: AiPresetResponse): BuiltMidiPreset {
   // 2. CC activation for every block (active AND empty). The bulk dump already
   //    wrote the matrix; these CCs just light up the pedals on screen. Sender
   //    applies DELAY_SYSEX after the SysEx and DELAY_CC after each CC.
+  //    Hardware slots (0–9) use their real display name; padding slots (10–11)
+  //    are labeled as reserved.
+  const entryBySlotCode = new Map<string, ChainEntry>();
+  for (const entry of activeEntries) {
+    const slot = findSlotForCode(entry.modulo);
+    if (slot) entryBySlotCode.set(slot.code, entry);
+  }
+
   for (let i = 0; i < CC_BLOCK_COUNT; i++) {
     const cc = CC_BLOCK_BASE + i;
-    const entry = activeEntries[i];
-    const label = entry
-      ? `Ativar bloco ${i + 1} (${entry.nomeEfeito}) → CC${cc} = 127`
-      : `Forçar render bloco ${i + 1} (slot vazio) → CC${cc} = 127`;
-    commands.push({ type: 'cc', cc, value: BLOCK_ON, label });
+    const slotEntry = SLOT_TABLE[i];
+    if (slotEntry) {
+      const entry = entryBySlotCode.get(slotEntry.slot.code);
+      const label = entry
+        ? `Ativar ${slotEntry.slot.displayName} (${entry.nomeEfeito}) → CC${cc} = 127`
+        : `Forçar render ${slotEntry.slot.displayName} (slot vazio) → CC${cc} = 127`;
+      commands.push({ type: 'cc', cc, value: BLOCK_ON, label });
+    } else {
+      commands.push({
+        type: 'cc',
+        cc,
+        value: BLOCK_ON,
+        label: `Reservado bloco ${i + 1} (padding) → CC${cc} = 127`,
+      });
+    }
   }
 
   // 3. Master volume (CC7). Use the VOL module's primary knob when present;
