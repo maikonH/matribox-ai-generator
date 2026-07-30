@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { Usb } from 'lucide-react';
 import Header from './components/Header';
 import SettingsDrawer from './components/SettingsDrawer';
+import CaptureDiffModal from './components/CaptureDiffModal';
 import PromptBar from './components/PromptBar';
 import PresetCard from './components/PresetCard';
 import ToastContainer from './components/ToastContainer';
@@ -16,6 +17,7 @@ import type { Algorithm, GeneratedPreset } from './lib/types';
 export default function App() {
   const [algorithms, setAlgorithms] = useState<Algorithm[]>(() => loadAlgorithms());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [diffOpen, setDiffOpen] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [preset, setPreset] = useState<GeneratedPreset | null>(null);
   const [midiCommands, setMidiCommands] = useState<MidiCommand[]>([]);
@@ -109,7 +111,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-bg-900 text-slate-200">
-      <Header algCount={ALGORITHM_COUNT} onOpenSettings={() => setSettingsOpen(true)} />
+      <Header algCount={ALGORITHM_COUNT} onOpenSettings={() => setSettingsOpen(true)} onOpenDiff={() => setDiffOpen(true)} />
 
       <main className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         <div className="space-y-3">
@@ -161,6 +163,8 @@ export default function App() {
         }}
         onToast={showToast}
       />
+
+      <CaptureDiffModal open={diffOpen} onClose={() => setDiffOpen(false)} />
 
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>

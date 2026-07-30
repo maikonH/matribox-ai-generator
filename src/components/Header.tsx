@@ -1,11 +1,12 @@
-import { Settings, Zap, Cpu } from 'lucide-react';
+import { Settings, Zap, Cpu, GitCompareArrows } from 'lucide-react';
 
 interface Props {
   algCount: number;
   onOpenSettings: () => void;
+  onOpenDiff: () => void;
 }
 
-export default function Header({ algCount, onOpenSettings }: Props) {
+export default function Header({ algCount, onOpenSettings, onOpenDiff }: Props) {
   return (
     <header className="sticky top-0 z-50 bg-bg-900/80 backdrop-blur-xl border-b border-border">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
@@ -34,6 +35,16 @@ export default function Header({ algCount, onOpenSettings }: Props) {
               <span className="text-muted"> algs</span>
             </span>
           </div>
+
+          <button
+            onClick={onOpenDiff}
+            aria-label="Diff de Captura"
+            title="Diff de Captura SysEx"
+            className="h-10 px-3 rounded-lg bg-surface border border-border flex items-center gap-2 text-muted hover:text-cyan-400 hover:border-cyan-500/50 transition-all duration-200"
+          >
+            <GitCompareArrows className="w-5 h-5" />
+            <span className="text-xs font-semibold hidden sm:inline">Diff</span>
+          </button>
 
           <button
             onClick={onOpenSettings}
