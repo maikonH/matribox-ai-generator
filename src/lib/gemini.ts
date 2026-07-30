@@ -160,6 +160,11 @@ export function validateAiResponse(ai: AiPresetResponse, catalog: Algorithm[]): 
       errors.push(`Efeito "${entry.nomeEfeito}" (posição ${pos}) não existe em alg_data.json.`);
       return;
     }
+    // Stamp the real numeric FXID from alg_data.json onto the entry. This is
+    // the single point where the catalog confirms an effect exists, so the
+    // FXID travels downstream with the validated chain and the MIDI builder
+    // injects it directly into SysEx bytes 59–60 without re-resolving by name.
+    entry.fxid = Number(alg.fxId);
     if (entry.knobs.length !== alg.params.length) {
       errors.push(
         `Efeito "${entry.nomeEfeito}" (posição ${pos}): ${entry.knobs.length} knobs recebidos, ${alg.params.length} esperados.`,

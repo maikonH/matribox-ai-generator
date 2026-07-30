@@ -38,7 +38,6 @@
 // accept CC commands for that block. CC commands use a shorter 25 ms gap.
 
 import { findSlotForCode, HARDWARE_SLOTS } from './hardwareSlots';
-import { resolveFxId } from './algorithmCatalog';
 import type { AiPresetResponse, ChainEntry } from './presetBuilder';
 
 // ── Command types ─────────────────────────────────────────────────────────────
@@ -182,17 +181,27 @@ function buildModelLoadSysEx(
 }
 
 /**
- * Build the full MIDI command sequence for the pedalboard from the AI
- * response. For each active block the flow is:
- *   1. SysEx model-load (108 bytes)
- *   2. CC quick-knob parameter
- *   3. CC block activation (127 = ON)
- * Throws if any module/effect cannot be resolved.
+ * Build the full MIDI command sequence for the pedalboard from the validated
+ * AI response. The FXID for every effect is stamped onto each chain entry by
+ * validateAiResponse (the single point where alg_data.json confirms an effect
+ * exists), so this builder consumes entry.fxid directly and injects it into
+ * SysEx bytes 59–60 without re-resolving by name.
+ *
+ * Per-block sequence (strictly enforced — the sender applies DELAY_SYSEX after
+ * every SysEx and DELAY_CC after every CC):
+ *   1. SysEx model-load (108 bytes) — injects the real FXID into the block slot
+ *   2. 80 ms delay (firmware processes the model load)
+ *   3. CC parameter changes — sets knob values
+ *   4. CC activation (127) — lights up the block pedal
+ * Throws if any entry is missing its resolved FXID or references an unknown module.
  */
 export function buildMidiPreset(ai: AiPresetResponse): BuiltMidiPreset {
   const errors: string[] = [];
 
-  // Validate every chain entry against the catalog before emitting anything.
+  // Guard: every chain entry must carry a resolved FXID. By the time this runs
+  // the response has already passed validateAiResponse, which stamps fxid from
+  // alg_data.json and throws on any unknown effect — so a missing fxid here
+  // means the caller bypassed validation.
   for (let i = 0; i < ai.cadeia.length; i++) {
     const entry = ai.cadeia[i];
     const slot = findSlotForCode(entry.modulo);
@@ -202,10 +211,9 @@ export function buildMidiPreset(ai: AiPresetResponse): BuiltMidiPreset {
       );
       continue;
     }
-    const fxid = resolveFxId(entry.nomeEfeito);
-    if (fxid === undefined) {
+    if (entry.fxid === undefined || Number.isNaN(entry.fxid)) {
       errors.push(
-        `Efeito "${entry.nomeEfeito}" (posição ${i + 1}) não foi encontrado no catálogo.`,
+        `Efeito "${entry.nomeEfeito}" (posição ${i + 1}) sem FXID resolvido — o preset não passou pela validação do catálogo.`,
       );
     }
   }
@@ -223,20 +231,25 @@ export function buildMidiPreset(ai: AiPresetResponse): BuiltMidiPreset {
     activeEntries.push(ai.cadeia[i]);
   }
 
-  // Per-block flow: SysEx model-load → CC parameters → CC activation (127).
+  // Per-block flow: SysEx model-load (FXID) → 80ms → CC parameters → CC activation (127).
   for (let i = 0; i < CC_BLOCK_COUNT; i++) {
     const cc = CC_BLOCK_BASE + i;
     const entry = activeEntries[i];
 
     if (entry) {
-      const fxid = resolveFxId(entry.nomeEfeito)!;
+      // The real FXID resolved from alg_data.json during validation — injected
+      // directly into SysEx bytes 59 (low 7 bits) and 60 (high 7 bits).
+      const fxid = entry.fxid!;
 
-      // 1. SysEx model-load — instantiate the algorithm into the block slot.
+      // 1. SysEx model-load — injects the FXID into the block slot so the
+      //    firmware loads the right algorithm before any CC takes effect.
       const sysex = buildModelLoadSysEx(i, fxid, entry.nomeEfeito);
       commands.push({ type: 'sysex', ...sysex });
+      // ↑ sender applies DELAY_SYSEX (80 ms) here, giving the firmware time to
+      //   process the model load before the CC commands below arrive.
 
-      // 2. CC quick-knob parameter (only the first 3 blocks expose a quick
-      //    knob on CC16/CC18/CC20).
+      // 2. CC parameter changes (only the first 3 blocks expose a quick knob
+      //    on CC16/CC18/CC20). Sender applies DELAY_CC (25 ms) after each.
       if (i < CC_KNOB.length && entry.knobs.length > 0) {
         const midi = toMidiRange(entry.knobs[0]);
         commands.push({
@@ -247,7 +260,8 @@ export function buildMidiPreset(ai: AiPresetResponse): BuiltMidiPreset {
         });
       }
 
-      // 3. Force activation ON — lights up the block pedal.
+      // 3. CC activation (127) — lights up the block pedal. Sender applies
+      //    DELAY_CC (25 ms) after.
       commands.push({
         type: 'cc',
         cc,
