@@ -87,35 +87,49 @@ export function buildMidiPreset(ai: AiPresetResponse): BuiltMidiPreset {
 
   const commands: MidiCCCommand[] = [];
 
-  // 1. Block activation (CC43..CC54). Up to 12 blocks; active modules are
-  //    assigned to consecutive slots in the order the AI returned them.
+  // Active modules are assigned to consecutive block slots (1..12) in the
+  // order the AI returned them.
   const activeEntries: ChainEntry[] = [];
   for (let i = 0; i < ai.cadeia.length && i < CC_BLOCK_COUNT; i++) {
     activeEntries.push(ai.cadeia[i]);
   }
 
+  // 1. Per-block: send the quick-knob parameter FIRST, then immediately the
+  //    block activation command (127 = ON). This guarantees the pedalboard
+  //    receives the parameter change and then lights up the block — no active
+  //    block is ever left in bypass (value 0).
   for (let i = 0; i < CC_BLOCK_COUNT; i++) {
     const cc = CC_BLOCK_BASE + i;
-    if (i < activeEntries.length) {
-      commands.push({ cc, value: BLOCK_ON, label: `Ativar bloco ${i + 1} (${activeEntries[i].nomeEfeito})` });
+    const entry = activeEntries[i];
+
+    if (entry) {
+      // Quick knob parameter for this block (only the first 3 blocks expose a
+      // quick knob on CC16/CC18/CC20).
+      if (i < CC_KNOB.length && entry.knobs.length > 0) {
+        const midi = toMidiRange(entry.knobs[0]);
+        commands.push({
+          cc: CC_KNOB[i],
+          value: midi,
+          label: `Knob ${i + 1} = ${entry.knobs[0]}% (bloco ${i + 1})`,
+        });
+      }
+      // Force activation ON immediately after the parameter.
+      commands.push({
+        cc,
+        value: BLOCK_ON,
+        label: `Ativar bloco ${i + 1} (${entry.nomeEfeito}) → CC${cc} = 127`,
+      });
     } else {
-      commands.push({ cc, value: BLOCK_OFF, label: `Desativar bloco ${i + 1}` });
+      // Unused block: explicitly turn it OFF.
+      commands.push({
+        cc,
+        value: BLOCK_OFF,
+        label: `Desativar bloco ${i + 1} → CC${cc} = 0`,
+      });
     }
   }
 
-  // 2. Quick knobs (CC16, CC18, CC20). Derive from the first three active
-  //    modules' primary knob (first knob value), mapped to 0–127.
-  for (let k = 0; k < CC_KNOB.length; k++) {
-    const entry = activeEntries[k];
-    if (entry && entry.knobs.length > 0) {
-      const midi = toMidiRange(entry.knobs[0]);
-      commands.push({ cc: CC_KNOB[k], value: midi, label: `Knob ${k + 1} = ${entry.knobs[0]}%` });
-    } else {
-      commands.push({ cc: CC_KNOB[k], value: 0, label: `Knob ${k + 1} = neutro` });
-    }
-  }
-
-  // 3. Master volume (CC7). Use the VOL module's primary knob when present;
+  // 2. Master volume (CC7). Use the VOL module's primary knob when present;
   //    otherwise default to a safe 90%.
   const volEntry = ai.cadeia.find(
     (e) => findSlotForCode(e.modulo)?.uiType === 'VOLUME',
@@ -125,7 +139,7 @@ export function buildMidiPreset(ai: AiPresetResponse): BuiltMidiPreset {
     : Math.round(0.9 * 127);
   commands.push({ cc: CC_VOLUME, value: masterVol, label: 'Volume Geral (CC7)' });
 
-  // 4. Expression pedal (CC11) — neutral heel-down by default.
+  // 3. Expression pedal (CC11) — neutral heel-down by default.
   commands.push({ cc: CC_EXPRESSION, value: 0, label: 'Pedal de Expressão (CC11)' });
 
   return {
