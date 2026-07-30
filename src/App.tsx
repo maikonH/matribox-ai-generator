@@ -9,7 +9,7 @@ import { useToasts } from './hooks/useToasts';
 import { loadAlgorithms, setDevOverlay } from './lib/algorithmStore';
 import { ALGORITHM_COUNT } from './lib/algorithmCatalog';
 import { generatePreset, aiResponseToPreset } from './lib/gemini';
-import { buildMidiPreset, type BuiltMidiPreset, type MidiCommand } from './lib/midiBuilder';
+import { buildMidiPreset, type BuiltMidiPreset, type MidiCommand, DELAY_SYSEX, DELAY_CC } from './lib/midiBuilder';
 import { connectMatribox, sendCC, sendSysEx, getOutput } from './lib/midiSender';
 import type { Algorithm, GeneratedPreset } from './lib/types';
 
@@ -55,10 +55,11 @@ export default function App() {
         for (const cmd of built.commands) {
           if (cmd.type === 'sysex') {
             sendSysEx(output, cmd.bytes);
+            await new Promise((r) => setTimeout(r, DELAY_SYSEX));
           } else {
             sendCC(output, cmd.cc, cmd.value);
+            await new Promise((r) => setTimeout(r, DELAY_CC));
           }
-          await new Promise((r) => setTimeout(r, 25));
         }
         setInjected(true);
         showToast(`Timbre "${built.nomePatch}" injetado em tempo real!`, 'success');

@@ -6,13 +6,22 @@
 // into the target block slot. Only then do CC parameter changes and the block
 // activation (CC43..CC54 = 127) take effect and light up the pedal.
 //
-// SysEx model-load packet structure (reverse-engineered from app.so):
-//   [0xF0, 0x00, 0x01, 0x3A]  — Sonicake manufacturer signature
-//   Fixed 108-byte frame padded with the standard template
-//   data[58] = effect category byte  (fxid >>> 24)
-//   data[59] = effect model byte    (fxid & 0xFF)
-//   data[60] = effect model high byte (fxid >> 8 & 0xFF)  [if needed]
-//   [0xF7]                    — SysEx terminator
+// SysEx model-load packet structure (108 bytes total, reverse-engineered
+// from app.so):
+//
+//  Offset  Content
+//  ------  -------
+//  0–3     [0xF0, 0x00, 0x01, 0x3A]  Sonicake manufacturer signature
+//  4       Command opcode  (0x06 = switch/load effect model)
+//  5       Block slot index (0–11)
+//  6       Flags / reserved (0x01 = apply immediately)
+//  7–57    Standard template padding (zeros)
+//  58      Effect category ID  (fxid >>> 24)
+//  59      Effect model ID — low 7 bits  (fxid & 0x7F)
+//  60      Effect model ID — high 7 bits ((fxid >>> 7) & 0x7F)
+//  61–105  Padding (zeros)
+//  106     Checksum  (XOR of bytes 4–105, masked to 7 bits)
+//  107     0xF7  SysEx terminator
 //
 // CC map (official reverse-engineering of the hardware):
 //   CC7  — Volume Geral (master volume)
@@ -24,6 +33,9 @@
 //   1. SysEx model-load (108 bytes) → loads the algorithm into the block slot
 //   2. CC parameter changes → sets knob values
 //   3. CC activation (127) → lights up the block pedal
+//
+// Timing: the firmware needs ~80 ms after a SysEx model-load before it will
+// accept CC commands for that block. CC commands use a shorter 25 ms gap.
 
 import { findSlotForCode, HARDWARE_SLOTS } from './hardwareSlots';
 import { resolveFxId } from './algorithmCatalog';
@@ -68,6 +80,23 @@ const BLOCK_OFF = 0;
 const SYSEX_HEADER = [0xf0, 0x00, 0x01, 0x3a];
 const SYSEX_TERMINATOR = 0xf7;
 const SYSEX_PACKET_LEN = 108;
+const SYSEX_CMD_SWITCH_EFFECT = 0x06;
+const SYSEX_FLAG_IMMEDIATE = 0x01;
+
+// Offsets within the full 108-byte packet.
+const OFFSET_CMD = 4;
+const OFFSET_SLOT = 5;
+const OFFSET_FLAGS = 6;
+const OFFSET_CATEGORY = 58;
+const OFFSET_MODEL_LO = 59;
+const OFFSET_MODEL_HI = 60;
+const OFFSET_CHECKSUM = 106;
+
+// Delays (ms) between sent messages.
+const DELAY_SYSEX = 80; // firmware needs time to process model load
+const DELAY_CC = 25;
+
+export { DELAY_SYSEX, DELAY_CC };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -81,10 +110,38 @@ function toMidiRange(value: number): number {
   return Math.round((clampKnob(value) / 100) * 127);
 }
 
+/** Clamp a value to the 7-bit MIDI data-byte range (0–127). */
+function to7Bit(value: number): number {
+  return Math.min(127, Math.max(0, value & 0x7f));
+}
+
+/**
+ * Compute the SysEx checksum: XOR of all bytes from OFFSET_CMD through
+ * OFFSET_CHECKSUM - 1, masked to 7 bits.
+ */
+function sysexChecksum(packet: number[]): number {
+  let xor = 0;
+  for (let i = OFFSET_CMD; i < OFFSET_CHECKSUM; i++) {
+    xor ^= packet[i];
+  }
+  return xor & 0x7f;
+}
+
 /**
  * Build a 108-byte SysEx model-load packet for a given effect.
- * The category byte goes at data[58], the model low byte at data[59],
- * and the model high byte at data[60].
+ *
+ * Layout:
+ *   [0–3]   F0 00 01 3A          Sonicake header
+ *   [4]     0x06                  Command: switch/load effect
+ *   [5]     blockIndex            Target block slot (0–11)
+ *   [6]     0x01                  Flag: apply immediately
+ *   [7–57]  zeros                 Template padding
+ *   [58]    category              fxid >>> 24
+ *   [59]    modelLo               fxid & 0x7F  (7-bit)
+ *   [60]    modelHi               (fxid >>> 7) & 0x7F  (7-bit)
+ *   [61–105] zeros                Padding
+ *   [106]   checksum              XOR of bytes 4–105
+ *   [107]   F7                    Terminator
  */
 function buildModelLoadSysEx(
   blockIndex: number,
@@ -92,39 +149,35 @@ function buildModelLoadSysEx(
   effectName: string,
 ): MidiSysExCommand {
   const category = (fxid >>> 24) & 0xff;
-  const modelLow = fxid & 0xff;
-  const modelHigh = (fxid >>> 8) & 0xff;
+  const modelLo = to7Bit(fxid);
+  const modelHi = to7Bit(fxid >>> 7);
 
-  // Build the 108-byte packet: header + payload + terminator.
-  // Payload is zero-padded to reach the fixed length, with category and
-  // model bytes placed at the protocol-defined offsets.
-  const packet: number[] = [];
-  packet.push(...SYSEX_HEADER);
+  // Start with a zero-filled 108-byte buffer.
+  const packet = new Array<number>(SYSEX_PACKET_LEN).fill(0);
 
-  // Reserve space for the payload (everything between header and terminator).
-  const payloadLen = SYSEX_PACKET_LEN - SYSEX_HEADER.length - 1; // minus F7
-  const payload = new Array<number>(payloadLen).fill(0);
+  // Header
+  packet[0] = SYSEX_HEADER[0];
+  packet[1] = SYSEX_HEADER[1];
+  packet[2] = SYSEX_HEADER[2];
+  packet[3] = SYSEX_HEADER[3];
 
-  // Block slot index in the first payload byte.
-  payload[0] = blockIndex;
+  // Command structure
+  packet[OFFSET_CMD] = SYSEX_CMD_SWITCH_EFFECT;
+  packet[OFFSET_SLOT] = to7Bit(blockIndex);
+  packet[OFFSET_FLAGS] = SYSEX_FLAG_IMMEDIATE;
 
-  // Category and model IDs at the protocol-defined offsets (data[58], data[59],
-  // data[60] — measured from the start of the full packet, so we subtract the
-  // header length to index into the payload array).
-  const catOffset = 58 - SYSEX_HEADER.length;
-  const modelLowOffset = 59 - SYSEX_HEADER.length;
-  const modelHighOffset = 60 - SYSEX_HEADER.length;
+  // Category and model IDs at the protocol-defined offsets
+  packet[OFFSET_CATEGORY] = to7Bit(category);
+  packet[OFFSET_MODEL_LO] = modelLo;
+  packet[OFFSET_MODEL_HI] = modelHi;
 
-  payload[catOffset] = category;
-  payload[modelLowOffset] = modelLow;
-  payload[modelHighOffset] = modelHigh;
-
-  packet.push(...payload);
-  packet.push(SYSEX_TERMINATOR);
+  // Checksum + terminator
+  packet[OFFSET_CHECKSUM] = sysexChecksum(packet);
+  packet[SYSEX_PACKET_LEN - 1] = SYSEX_TERMINATOR;
 
   return {
     bytes: packet,
-    label: `SysEx modelo: bloco ${blockIndex + 1} ← ${effectName} (cat=${category}, model=0x${modelHigh.toString(16).padStart(2, '0')}${modelLow.toString(16).padStart(2, '0')})`,
+    label: `SysEx modelo: bloco ${blockIndex + 1} ← ${effectName} (cat=${category}, model=0x${modelHi.toString(16).padStart(2, '0')}${modelLo.toString(16).padStart(2, '0')})`,
   };
 }
 
