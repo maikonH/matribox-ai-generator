@@ -1,16 +1,16 @@
-import { useState, useCallback, useRef } from 'react';
-import { Music, Usb } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { Usb } from 'lucide-react';
 import Header from './components/Header';
 import SettingsDrawer from './components/SettingsDrawer';
 import PromptBar from './components/PromptBar';
 import PresetCard from './components/PresetCard';
 import ToastContainer from './components/ToastContainer';
-import MidiRecovery from './components/MidiRecovery';
 import { useToasts } from './hooks/useToasts';
 import { loadAlgorithms, setDevOverlay } from './lib/algorithmStore';
 import { ALGORITHM_COUNT } from './lib/algorithmCatalog';
 import { generatePreset, aiResponseToPreset } from './lib/gemini';
-import { buildPresetFile, downloadPresetFile, type AiPresetResponse, type BuiltPreset } from './lib/presetBuilder';
+import { buildMidiPreset, type BuiltMidiPreset, type MidiCCCommand } from './lib/midiBuilder';
+import { connectMatribox, sendCCBatch, getOutput } from './lib/midiSender';
 import type { Algorithm, GeneratedPreset } from './lib/types';
 
 export default function App() {
@@ -18,24 +18,48 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [preset, setPreset] = useState<GeneratedPreset | null>(null);
-  const aiResponseRef = useRef<AiPresetResponse | null>(null);
-  const [builtPreset, setBuiltPreset] = useState<BuiltPreset | null>(null);
+  const [midiCommands, setMidiCommands] = useState<MidiCCCommand[]>([]);
   const [loading, setLoading] = useState(false);
+  const [injecting, setInjecting] = useState(false);
+  const [injected, setInjected] = useState(false);
   const { toasts, showToast, dismiss } = useToasts();
-  const [view, setView] = useState<'preset' | 'recovery'>('preset');
 
   const runGeneration = useCallback(
     (promptText: string, merged: Algorithm[]) => {
       setLoading(true);
+      setInjected(false);
       generatePreset(promptText, merged)
-        .then((ai) => {
-          aiResponseRef.current = ai;
-          setBuiltPreset(buildPresetFile(ai));
+        .then(async (ai) => {
           setPreset(aiResponseToPreset(ai, algorithms));
-          showToast(`Preset "${ai.nomePatch}" gerado com sucesso!`, 'success');
+          const built = buildMidiPreset(ai);
+          setMidiCommands(built.commands);
+          showToast(`Preset "${ai.nomePatch}" montado pela IA. Injetando via USB...`, 'info');
+          await injectMidi(built);
         })
         .catch((e: Error) => showToast(e.message, 'error'))
         .finally(() => setLoading(false));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [showToast, algorithms],
+  );
+
+  const injectMidi = useCallback(
+    async (built: BuiltMidiPreset) => {
+      setInjecting(true);
+      try {
+        let output = getOutput();
+        if (!output) {
+          output = await connectMatribox();
+          showToast('Conectado à Matribox II Pro via USB', 'success');
+        }
+        await sendCCBatch(output, built.commands);
+        setInjected(true);
+        showToast(`Timbre "${built.nomePatch}" injetado em tempo real!`, 'success');
+      } catch (e) {
+        showToast(`Erro MIDI: ${(e as Error).message}`, 'error');
+      } finally {
+        setInjecting(false);
+      }
     },
     [showToast],
   );
@@ -66,98 +90,57 @@ export default function App() {
         });
         return { ...prev, modules };
       });
-      // The UI modules array mirrors ai.cadeia 1:1 (active modules only, in
-      // cadeia order), so moduleIndex is the cadeia index directly. Rebuild
-      // the .prst bytes so the download always reflects the slider state.
-      const prevAi = aiResponseRef.current;
-      if (prevAi) {
-        const cadeia = prevAi.cadeia.map((entry, i) => {
-          if (i !== moduleIndex) return entry;
-          const knobs = entry.knobs.map((k, kIdx) => {
-            if (kIdx !== paramIndex) return k;
-            // qKnob is always 0–100; normalize the slider's native-range value
-            // back to that scale using the param's own min/max.
-            const mod = preset?.modules[moduleIndex];
-            const p = mod?.params[paramIndex];
-            if (!p) return Math.round(value);
-            const span = p.max - p.min;
-            const norm = span > 0 ? ((value - p.min) / span) * 100 : value;
-            return Math.min(100, Math.max(0, Math.round(norm)));
-          });
-          return { ...entry, knobs };
-        });
-        const updated = { ...prevAi, cadeia };
-        aiResponseRef.current = updated;
-        setBuiltPreset(buildPresetFile(updated));
-      }
     },
     [],
   );
 
-  const handleDownload = useCallback(() => {
-    if (!builtPreset) return;
-    downloadPresetFile(builtPreset);
-    showToast(`Arquivo ${builtPreset.nomePatch}.prst baixado!`, 'success');
-  }, [builtPreset, showToast]);
+  const handleReinject = useCallback(() => {
+    if (midiCommands.length === 0) return;
+    injectMidi({ commands: midiCommands, nomePatch: preset?.title ?? '', comentario: '' });
+  }, [midiCommands, preset, injectMidi]);
 
   return (
     <div className="min-h-screen bg-bg-900 text-slate-200">
       <Header algCount={ALGORITHM_COUNT} onOpenSettings={() => setSettingsOpen(true)} />
 
-      <main className={`mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 ${view === 'preset' ? 'max-w-3xl' : 'max-w-2xl'}`}>
-        {/* Tab toggle */}
-        <div className="flex gap-2 p-1 bg-surface rounded-xl border border-border w-fit mx-auto">
-          <button
-            onClick={() => setView('preset')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-              view === 'preset' ? 'bg-primary-500 text-bg-900' : 'text-muted hover:text-primary-400'
-            }`}
-          >
-            <Music className="w-4 h-4" />
-            Gerador de Presets
-          </button>
-          <button
-            onClick={() => setView('recovery')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-              view === 'recovery' ? 'bg-warning-500 text-bg-900' : 'text-muted hover:text-warning-400'
-            }`}
-          >
-            <Usb className="w-4 h-4" />
-            Recovery MIDI
-          </button>
+      <main className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        <div className="space-y-3">
+          <div className="text-center">
+            <h2 className="text-white font-bold text-2xl sm:text-3xl tracking-tight">
+              Gerar Preset por IA
+            </h2>
+            <p className="text-slate-400 text-sm mt-1">
+              Descreva o som e a IA monta a cadeia de sinal, enviada em tempo real via USB
+            </p>
+          </div>
+          <PromptBar
+            value={prompt}
+            onChange={setPrompt}
+            onSubmit={handleGenerate}
+            loading={loading}
+            onQuickPrompt={handleQuickPrompt}
+          />
         </div>
 
-        {view === 'preset' && (
-          <div className="space-y-8">
-            <div className="space-y-3">
-              <div className="text-center">
-                <h2 className="text-white font-bold text-2xl sm:text-3xl tracking-tight">
-                  Gerar Preset por IA
-                </h2>
-                <p className="text-slate-400 text-sm mt-1">
-                  Descreva o som e a IA monta a cadeia de sinal completa
-                </p>
-              </div>
-              <PromptBar
-                value={prompt}
-                onChange={setPrompt}
-                onSubmit={handleGenerate}
-                loading={loading}
-                onQuickPrompt={handleQuickPrompt}
-              />
-            </div>
+        {/* Real-time USB injection banner */}
+        <div className="flex items-start gap-3 rounded-xl border border-primary-500/30 bg-primary-500/5 px-4 py-3">
+          <Usb className="w-5 h-5 text-primary-400 shrink-0 mt-0.5" />
+          <p className="text-sm text-slate-300 leading-relaxed">
+            <span className="font-semibold text-primary-300">Tempo real via USB.</span>{' '}
+            Timbre injetado via USB em tempo real. Se gostar do som, pressione o botão físico{' '}
+            <span className="font-bold text-white">SAVE</span> na pedaleira para gravar permanentemente.
+          </p>
+        </div>
 
-            <PresetCard
-              preset={preset}
-              loading={loading}
-              onParamChange={handleParamChange}
-              onDownload={handleDownload}
-              canDownload={!!builtPreset}
-            />
-          </div>
-        )}
-
-        {view === 'recovery' && <MidiRecovery />}
+        <PresetCard
+          preset={preset}
+          loading={loading}
+          injecting={injecting}
+          injected={injected}
+          onParamChange={handleParamChange}
+          onReinject={handleReinject}
+          midiCommands={midiCommands}
+        />
       </main>
 
       <SettingsDrawer
