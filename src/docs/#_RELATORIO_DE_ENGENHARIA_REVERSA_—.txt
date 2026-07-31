@@ -1,0 +1,958 @@
+# RELATÓRIO DE ENGENHARIA REVERSA — app.so
+## Editor Sonicake Matribox II Pro / QME-200
+
+**Data da análise:** 31 de Julho de 2026  
+**Arquivo analisado:** `app.so` (7.013.296 bytes)  
+**Analista:** Engenharia Reversa Automatizada  
+
+---
+
+## ÍNDICE
+
+1. [Identificação do Binário](#1-identificação-do-binário)
+2. [Assinaturas e Funções de Envio](#2-assinaturas-e-funções-de-envio)
+3. [Comandos de Handshake e Sessão](#3-comandos-de-handshake-e-sessão)
+4. [Estrutura do Bulk Dump (Preset Matrix)](#4-estrutura-do-bulk-dump-preset-matrix)
+5. [Mapeamento de FXID e Parâmetros de 7-Bits](#5-mapeamento-de-fxid-e-parâmetros-de-7-bits)
+6. [Códigos Hexadecimais Brutos](#6-códigos-hexadecimais-brutos)
+7. [Observações Críticas](#7-observações-críticas)
+8. [Apêndice: Endereços de Memória](#8-apêndice-endereços-de-memória)
+
+---
+
+## 1. IDENTIFICAÇÃO DO BINÁRIO
+
+| Propriedade | Valor |
+|---|---|
+| **Formato** | ELF64 x86-64, Dinâmico |
+| **Tamanho** | 7.013.296 bytes (6,7 MB) |
+| **Build ID** | `10c391add56321cf39eb343728f1f426` |
+| **Tipo** | Dart AOT Snapshot (Flutter) — modo *product*, *null-safety* |
+| **App Package** | `qme_200` (QME-200) |
+| **Dispositivo-alvo** | Matribox II PRO (Hotone/Sonicake) |
+| **Compilado em** | Windows x64, sem compressed-pointers |
+
+### Mapa de Memória ELF
+
+| Símbolo Dynsym | Endereço | Tamanho | Descrição |
+|---|---|---|---|
+| `_kDartVmSnapshotInstructions` | `0x2c0000` | 26.112 bytes | Instruções VM (runtime) |
+| `_kDartIsolateSnapshotInstructions` | `0x2c6600` | ~4 MB (0x3E5BD0) | **Código do app** (todas as funções Dart compiladas) |
+| `_kDartVmSnapshotData` | `0x0200` | 35.040 bytes | Dados VM (rodata) |
+| `_kDartIsolateSnapshotData` | `0x8b00` | ~2,8 MB (0x2B4EF0) | **Object Pool** (strings, constantes, class names) |
+| `_kDartSnapshotBuildId` | `0x01c8` | 32 bytes | ID do snapshot |
+
+### Assinatura do Snapshot
+
+```
+product no-code_comments no-dwarf_stack_traces_mode no-lazy_dispatchers
+dedup_instructions no-tsan no-asserts x64 windows
+no-compressed-pointers null-safety
+```
+
+### Arquivos de Código-Fonte Referenciados
+
+```
+package:qme_200/main.dart
+package:qme_200/common/EventBus/global_event_bus.dart
+package:qme_200/common/Task/HTaskManager.dart
+package:qme_200/common/Task/ImportCloneTask.dart
+package:qme_200/common/Task/ImportIRTask.dart
+package:qme_200/common/common.dart
+package:qme_200/common/file_select.dart
+package:qme_200/common/l10n/localizations.dart
+package:qme_200/common/l10n/strings.dart
+package:qme_200/common/style/ht_font.dart
+package:qme_200/common/style/ht_functions.dart
+package:qme_200/common/usb_tools/HTDeviceManager.dart
+package:qme_200/common/usb_tools/HTMIDIMessage.dart          ← Camada MIDI
+package:qme_200/common/usb_tools/HTMIDIMessageTask.dart       ← Fila de mensagens
+package:qme_200/common/usb_tools/device_manager.dart
+package:qme_200/common/usb_tools/lib_tools.dart               ← Ponte FFI nativa
+package:qme_200/common/wav_path_util.dart
+package:qme_200/ht_components_package/ht_algorithm_slider.dart
+package:qme_200/ht_components_package/ht_slider.dart
+package:qme_200/ht_components_package/switch_button.dart
+package:qme_200/model/HTBaseDefine.dart
+package:qme_200/model/HTGlobalModel.dart
+package:qme_200/model/HTModelManager.dart
+package:qme_200/model/HTModelPreset.dart
+package:qme_200/model/HTModelPresetControl.dart
+package:qme_200/model/globalDataStruct.g.dart
+package:qme_200/multi_window/HTGlobalSettingsWindow.dart
+package:qme_200/multi_window/desktop_multi_window_manager.dart
+package:qme_200/pages/device_connection/HTDeviceConnector.dart
+package:qme_200/pages/main_window/algorithm_model_edit/algorithm_ctl.dart
+package:qme_200/pages/main_window/algorithm_model_edit/algorithm_model_edit.dart
+package:qme_200/pages/main_window/app_layout_page.dart
+package:qme_200/pages/main_window/effect_chain/effect.dart
+package:qme_200/pages/main_window/effect_chain/effect_chain_widget.dart
+package:qme_200/pages/main_window/effect_chain/effect_controller.dart
+package:qme_200/pages/main_window/effect_chain/effect_item.dart
+package:qme_200/pages/main_window/effect_chain/effect_menu_widget.dart
+package:qme_200/pages/main_window/preset_list/HTModelUpload.dart
+package:qme_200/pages/main_window/preset_list/preset_list_controller.dart
+package:qme_200/pages/main_window/preset_list/preset_list_item.dart
+package:qme_200/pages/main_window/preset_list/preset_list_widget.dart
+package:qme_200/pages/main_window/preset_settings/ctrl_settings_content.dart
+package:qme_200/pages/main_window/preset_settings/exp_content.dart
+package:qme_200/pages/main_window/preset_settings/footswitch_content.dart
+package:qme_200/pages/main_window/preset_settings/knob_content.dart
+package:qme_200/pages/main_window/preset_settings/preset_settings_body.dart
+package:qme_200/pages/main_window/preset_settings/preset_settings_widget.dart
+package:qme_200/pages/settings_menu_page/global_eq_page.dart
+package:qme_200/pages/settings_menu_page/global_fw_update_page.dart
+package:qme_200/pages/settings_menu_page/global_settings_page.dart
+```
+
+---
+
+## 2. ASSINATURAS E FUNÇÕES DE ENVIO
+
+### 2.1 — Camada de Transporte FFI Nativa (biblioteca `@590500129`)
+
+O app não usa bibliotecas MIDI Dart de terceiros. Todo o transporte USB-MIDI é implementado via **FFI (Foreign Function Interface)** em uma biblioteca nativa (carregada via `DynamicLibrary.open`). As funções nativas são acessadas através de *trampolines* FFI compilados no snapshot.
+
+| Função FFI Nativa | String no binário | Função |
+|---|---|---|
+| `_connectDevice` | `FfiTrampoline__connectDevice` | Conecta ao dispositivo USB-MIDI |
+| `_disConnectDevice` | `FfiTrampoline__disConnectDevice` | Desconecta do dispositivo |
+| `_checkDeviceConnecting` | `FfiTrampoline__checkDeviceConnecting` | Verifica status de conexão (polling) |
+| `_scanInDevice` | `FfiTrampoline__scanInDevice` | Escaneia dispositivos MIDI de entrada |
+| `_scanOutDevice` | `FfiTrampoline__scanOutDevice` | Escaneia dispositivos MIDI de saída |
+| **`_sendMidiMessage`** | **`FfiTrampoline__sendMidiMessage`** | **Envio principal de mensagens MIDI/SysEx** |
+| `_midiProcess` | `FfiTrampoline__midiProcess` | Processamento de eventos MIDI recebidos (callback) |
+| `_deviceStartUpdate` | `FfiTrampoline__deviceStartUpdate` | Inicia loop de atualização do dispositivo |
+| `_registerSendPort` | `FfiTrampoline__registerSendPort` | Registra porta de comunicação Dart ↔ Nativo |
+| `_initDartApiDL` | `FfiTrampoline__initDartApiDL` | Inicializa Dart API DL (NativeApi) |
+| `_timerCallback` | `FfiTrampoline__timerCallback` | Callback de timer para polling de eventos |
+| `_getNormalWav` | `FfiTrampoline__getNormalWav` | Processamento de arquivos WAV (IR) |
+| `_namConvertCloData` | `FfiTrampoline__namConvertCloData` | Conversão de dados Clone (NAM) |
+| `_toolStartCompress` | `FfiTrampoline__toolStartCompress` | Compressão de dados |
+| `_toolStartDecompress` | `FfiTrampoline__toolStartDecompress` | Descompressão de dados |
+
+### 2.2 — Camada Dart de Envio (HTMIDIMessage / HTMIDIMessageTask)
+
+**Arquivo-fonte:** `package:qme_200/common/usb_tools/HTMIDIMessage.dart`
+
+#### Funções de Escrita (App → Hardware)
+
+| Método Dart | Offset da String | Parâmetros Lógicos | Descrição |
+|---|---|---|---|
+| `sendMIDIMessage` | `0x15b55` | `Uint8List message` | Envia mensagem MIDI/SysEx via FFI `_sendMidiMessage` |
+| `sendMidiMessage` | `0x8965` | (alias/overload) | Variante de envio |
+| `_sendData` (`@14069316`) | — | `List<int> data` | Constrói e envia pacote de dados brutos |
+| `switchEffect` | `0xf1c8` | `slotIndex, effectId/fxid` | Troca efeito em um slot da cadeia |
+| `effectSwitch` | `0x156d5` | `slotId, on/off` | Liga/desliga efeito |
+| `writeParameter` | `0x15b8c` | `parameterIndex, value` | Escreve parâmetro individual no hardware |
+| `setKnobParam` | `0x20aaf` | `knobId, paramIndex, value` | Define parâmetro de knob |
+| `setKnobModule` | `0x1dfdd` | `knobId, moduleId` | Associa módulo a knob rápido |
+| `setCtrlOnOff` | `0x48350` | `ctrlId, on/off` | Liga/desliga controlador |
+| `setFSSettings` | `0xff7a` | `fsId, fsFunction` | Configura função do footswitch |
+| `setGlobalEQValue` | `0x217f6` | `bandIndex, value` | Define valor de EQ global |
+| `setPresetBPM` | `0x204fe` | `bpm` | Define BPM do drum |
+| `setPresetVol` | `0x45b11` | `volume` | Define volume do preset |
+| `algKnobChangeSyncValue` | `0x4eb95` | `knobId, value` | Sincroniza valor de knob (com ack) |
+| `algKnobChangeSyncValueWithSlotID` | `0x4eb95` | `slotId, knobId, value` | Sincroniza valor com ID de slot |
+| `algKnobChangeValue` | `0xeb48` | `knobId, value` | Altera valor de knob (sem sync) |
+| `newUpdateKnobValue` | `0x18308` | `knobId, deltaY` | Atualização incremental de knob (drag) |
+| `changeEffectChain` | `0x1e89a` | `slotSequence` | Reordena cadeia de efeitos |
+| `changeSyncModelWithSyncIndex` | `0x1d160` | `syncIndex` | Sincroniza modelo com índice |
+| `machineChangeSyncModelWithSyncIndex` | `0xc4ee` | `syncIndex` | Sincronização via máquina de estados |
+| `addEffect` | `0x24c35` | `slotIndex, fxid/moduleId` | Adiciona efeito à cadeia |
+| `insertEffect` | `0x10db8` | `slotIndex, fxid` | Insere efeito em posição específica |
+| `removeEffect` | `0x100b8` | `slotIndex` | Remove efeito da cadeia |
+| `copyEffect` | `0x2b94d` | `fromSlot, toSlot` | Copia efeito entre slots |
+| `coverEffect` | `0x2061a` | `slotIndex, fxid` | Substitui efeito existente |
+| `pasteEffectChain` | `0x3bff5` | `targetSlot, sourceData` | Cola cadeia de efeitos |
+| `pasteInsertEffect` | `0x3fd72` | `slotIndex, effectData` | Insere efeito colado |
+| `stompFSClick` | `0xd48a` | `fsId` | Click de footswitch |
+| `stompFSHold` | `0x22287` | `fsId` | Hold (pressionar e segurar) de footswitch |
+| `stompFSABClick` | `0x100d4` | `fsId` | Click A/B de footswitch |
+| `resetFS` | `0x3d1e0` | — | Reset de configurações de footswitch |
+| `savePreset` | `0xa3aa` | `presetIndex` | Salva preset no hardware |
+| `deletePreset` | `0x5f6bb` | `presetIndex` | Deleta preset do hardware |
+| `movePreset` | `0x4a2e8` | `fromIndex, toIndex` | Move/reordena preset |
+| `presetRename` | `0x5d5a1` | `presetIndex, newName` | Renomeia preset no hardware |
+| `exportPresetTask` | `0x26d24` | `presetIndex, filePath` | Exporta preset para arquivo |
+| `exportPresetToFilePath` | `0x272af` | `presetIndex, filePath` | Exporta para caminho específico |
+| `importPreset` | `0x34d4a` | `filePath, targetIndex` | Importa preset de arquivo |
+
+#### Funções de Leitura (Hardware → App)
+
+| Método Dart | Offset da String | Parâmetros Lógicos | Descrição |
+|---|---|---|---|
+| `readEffectData` | `0x7b51` | `slotIndex` | Solicita leitura de dados de efeito do hardware |
+| `readCtrlData` | `0x19bee` | — | Solicita dados de controle (exp, knobs) |
+| `readKnobData` | `0x386e9` | `knobId` | Solicita valor atual de knob |
+| `readSlotAlgroData` | `0x52e57` | `slotIndex` | Solicita algoritmo do slot |
+| `readFSData` | `0x10664` | — | Solicita dados de footswitch |
+| `requestPresetWithIndex` | `0x2c83d` | `presetIndex` | Solicita preset específico do hardware |
+| `requestPresetExportWithIndex` | `0x1bb98` | `presetIndex` | Solicita exportação de preset do hardware |
+| `requestDrumData` | `0x18ee0` | — | Solicita dados do drum |
+| `requestGlobalEQ` | `0x1ea49` | — | Solicita dados de EQ global |
+| `requestGlobalData` | `0x556ee` | — | Solicita dados globais do dispositivo |
+| `requestUserCloneList` | `0x172e9` | — | Solicita lista de clones (NAM) do hardware |
+| `startLoadPresetList` | `0x188dc` | — | Inicia carregamento da lista de presets |
+| `startGetPresets` | `0x281b4` | — | Inicia obtenção de todos os presets |
+| `getAllWithParameters` | `0x38d83` | — | Obtém todos os efeitos com parâmetros |
+| `GetAllParameters` | `0x59976` | `effectId` | Obtém todos os parâmetros de um efeito |
+| `decodefunc` | `0x26cae` | `Uint8List rawData` | Decodifica dados de preset recebidos (HTModelPreset.decodefunc) |
+
+### 2.3 — Estrutura de Dados do Modelo (HTModelPreset)
+
+| Classe Dart | Campos Identificados |
+|---|---|
+| `HTModelPreset` | `presetName`, `presetNum`, `fxid`, `moduleId` |
+| `HTModelPresetSlot` | `slotId`, `effectSlotAlgro`, `effectSlotSequence`, `effectSlotState` |
+| `HTModelPresetScene` | (dados de cena do preset) |
+| `HTModelPresetControl` / `HTModelPresetCtrl` | `ctrlTargetSlot`, `ctrlLED` |
+| `HTModelPresetQKnob` | `quickAccessKnobTargetAlgorParam`, `knobId` |
+| `HTModelPresetFS` | `fsFun`, `fsId` |
+| `HTModelPresetExp` | `expTargetAlgorEffectNum` |
+| `HTModelPresetInfo` | (metadados do preset) |
+| `HTModelPresetVersionInfo` | (versão do formato de preset) |
+
+### 2.4 — Dados Globais
+
+| Classe | Campos |
+|---|---|
+| `GlobalDataMIDI` | `MIDI In Source`, `MIDI Out`, `Clock Out (USB)`, `Input Ch (USB)`, `Output Ch (USB)`, `MidiFollow` |
+| `GlobalDataUSBAudio` | (configuração de áudio USB, 8 canais USB Out) |
+| `GlobalDataDrum` | `drumBPM`, `drumGenre`, `drumVol` |
+| `GlobalDataFS` | `globalDataFS` |
+| `GlobalDataEXP` | `globalDataEXPs` (EXP1 A/B, EXP 2/Footswitch2) |
+| `GlobalDataIO` | (configurações de I/O) |
+| `GlobalDataDevice` | `deviceId`, `vendorId`, `productId` |
+| `GlobalDataDisplay` | (configurações de display) |
+| `GlobalDataStruct` | Estrutura base (com `fromJson`/`fromMap`/`toJson`) |
+
+### 2.5 — Campos Especiais Identificados
+
+| Campo | Tipo | Descrição |
+|---|---|---|
+| `fxid` | int (32-bit) | Effect ID único — fragmentado em 7 bits para SysEx |
+| `moduleId` | int | ID do módulo de efeito |
+| `fxrtn` | — | Effect return (FX loop return) |
+| `fxsnd` | — | Effect send (FX loop send) |
+| `idnum` | int | Número de ID genérico |
+| `prst` | — | Abreviação de preset |
+| `drumBPM` | int | BPM do drum (60-300 estimado) |
+| `drumGenre` | int/string | Gênero rítmico do drum |
+| `drumVol` | int | Volume do drum |
+| `ctrlLED` | bool/int | LED do controlador |
+| `fsFun` | int | Função do footswitch |
+| `recAuxIn` | — | Gravação de aux input |
+
+---
+
+## 3. COMANDOS DE HANDSHAKE E SESSÃO
+
+### 3.1 — Sequência de Inicialização (Boot → Conectado)
+
+O app segue uma máquina de estados finita (FSM) gerenciada por `HTaskManager` (`[FSM] HTaskManager init.`). A sequência completa de conexão é:
+
+```
+[App Start]
+    ↓
+_scanInDevice() / _scanOutDevice()     ← Escaneia portas USB-MIDI disponíveis
+    ↓
+_connectDevice()                        ← Conecta ao dispositivo (filtra por vendorId/productId)
+    ↓
+_registerSendPort()                     ← Registra canal Dart ↔ Nativo (SendPort)
+    ↓
+_initDartApiDL()                        ← Inicializa API nativa Dart
+    ↓
+_deviceStartUpdate()                    ← Inicia loop de polling via _timerCallback
+    ↓
+_checkDeviceConnecting()                ← Polling: verifica se conexão estabelecida
+    ↓ (conectado)
+requestGlobalData()                     ← Solicita estado global do hardware
+requestGlobalEQ()                       ← Solicita EQ global
+requestDrumData()                       ← Solicita dados do drum
+    ↓
+startLoadPresetList()                   ← Inicia carregamento da lista de presets
+    ↓
+startGetPresets()                       ← Obtém preset names e números
+    ↓
+requestPresetWithIndex(index)           ← Solicita cada preset individualmente
+    ↓
+[Pronto para edição]
+```
+
+### 3.2 — Máquina de Estados (FSM)
+
+Mensagens de log da FSM encontradas no binário:
+
+```
+[FSM] HTaskManager init.
+[FSM] Add new task , ret:
+[FSM] Auto start next task.
+[FSM] Error, undefine state input
+[FSM] No task now.
+[FSM] Now state 2
+[FSM] Task finished.
+[FSM] state switch to
+[FSM] task full, replace last.
+[FSM]Input run finished.
+```
+
+Estados internos identificados (prefixos `vh` no binário):
+
+```
+vhPI    vhPRI    vhPSI    vhPSRQA    vhPSRQAQI
+vhRI    vhSI     vhSRI    vhSRQI     vhVWI
+vhhB    vhhJ
+```
+
+### 3.3 — OpCodes de Handshake — Análise de Bytes
+
+**A assinatura SysEx `F0 21 25 4D 50 00` não está armazenada como sequência contígua no binário.** Cada byte é carregado individualmente do Dart Object Pool em tempo de execução:
+
+| Byte | Tagged Smi | Ocorrências no Pool | Método de Carga |
+|---|---|---|---|
+| `0xF0` (SysEx Start) | `0x1E0` | **0** (não encontrado) | Computado em runtime (provável `0xE0 \| 0x10`) |
+| `0x21` (Manufacturer ID) | `0x42` | 215 | `mov reg, [r15 + pool_offset]` |
+| `0x25` (Manufacturer ID 2) | `0x4A` | 155 | Pool + imediato direto em `0x2e0d44` |
+| `0x4D` (ASCII 'M') | `0x9A` | 12 | Pool |
+| `0x50` (ASCII 'P') | `0xA0` | 14 | Pool |
+| `0x00` (Device ID zero) | `0x00` | — | Pool (valor zero trivial) |
+| `0xF7` (EOX) | `0x1E0` | 1 (em `0x2786b8`) | Pool |
+
+### 3.4 — Funções de Eventos de Recepção
+
+| Handler | Descrição |
+|---|---|
+| `EventHandler_SendData` | Processa dados recebidos do dispositivo |
+| `EventHandler_TimerMillisecondClock` | Handler de clock/timer (sincronização) |
+| `eventHandlerSendData` | Despacha dados recebidos para a camada Dart |
+| `GlobalEventBus` | Barramento de eventos global (singleton `_internal@564015038`) |
+| `IREventBusRecv` | Receptor de eventos IR (Import IR) |
+| `CLONEEventBusRecv` | Receptor de eventos Clone (NAM) |
+| `HTMIDIMessageState` | Estado do processador de mensagens MIDI |
+| `HTMIDIMessageTask` | Tarefa de processamento de mensagem MIDI (fila) |
+
+### 3.5 — Mensagens do Usuário Relacionadas à Conexão
+
+```
+"Device Connected"
+"No Device Connected"
+"If the device is not connected for a long time, please try restarting the device or software."
+"Updating, please keep the device connected and do not shut down"
+"1. Turn the power off while keeping USB connection and power jack connected."
+"2. Hold the footswitch \"BANK -\" and \"BANK +\" along with the MENU knob; and turn the power on."
+```
+
+---
+
+## 4. ESTRUTURA DO BULK DUMP (PRESET MATRIX)
+
+### 4.1 — Função Construtora da Matriz de Preset
+
+**Endereço: `0x2eaa08`**
+
+Esta função aloca e preenche a matriz de dados do preset para envio ao hardware.
+
+#### Disassembly Anotado (trechos chave):
+
+```asm
+0x2eaa08:  push rbp                    ; prólogo da função
+0x2eaa0c:  sub rsp, 0x50               ; reserva 80 bytes de stack frame
+0x2eaa10:  mov eax, 0x16               ; 22 (0x16) = número de slots da cadeia
+0x2eaa2f:  call 0x6a71fc               ; alocar Uint8List(22)
+0x2eaa73:  call 0x6a71fc               ; alocar segundo array auxiliar
+0x2eaac2:  mov esi, 0x60               ; 96 (0x60) = tamanho do bloco de dados útil
+0x2eaaf4:  mov qword [rsp], 0x1c2      ; 450 (0x1C2) = tamanho/comando total do dump
+0x2eab00:  call [rax + rcx*8 + 0x2f4b8]; dispatch virtual (tipo de objeto)
+```
+
+### 4.2 — Tamanhos de Preset Identificados
+
+| Constante | Valor | Endereço | Significado |
+|---|---|---|---|
+| `0x60` | 96 bytes | `0x2eaac2` | **Tamanho principal do bloco de dados úteis do preset** |
+| `0x16` | 22 elementos | `0x2eaa10` | Número de slots na cadeia de efeitos |
+| `0x1C2` | 450 bytes | `0x2eaaf4` | Tamanho total do dump SysEx (header + data + checksum + EOX) |
+| `0x0A` | 10 | `0x2e0b08` | Capacidade inicial de lista (em `0x2e0b00`) |
+| `0x80` | 128 | `0x2e08fb` | Limite de expansão de lista (grow check) |
+
+**Limites do sistema (strings no binário):**
+- "The effects chain supports up to 12 modules" — 12 módulos de efeito simultâneos
+- "The number of files imported into preset cannot exceed 240" — máximo 240 presets
+- "The number of Clone (.NAM) files imported cannot exceed 10" — máximo 10 clones NAM
+- "The number of files imported into IR cannot exceed 20" — máximo 20 IRs
+
+### 4.3 — Construção do Array de Bytes
+
+Após a alocação, a função preenche o array com **128 valores constantes** via instruções `C6 /0 (mov byte ptr [reg+disp], imm8)` no intervalo `0x2eab5a`–`0x2ed83a`.
+
+#### Distribuição de Valores no Array
+
+| Valor Hex | Decimal | Frequência | Interpretação |
+|---|---|---|---|
+| `0xEB` | 235 | 19x | Tag de tipo de dado / opcode de controle |
+| `0xCD` | 205 | 18x | Marcador de seção / delimitador de campo |
+| `0xAC` | 172 | 17x | Marcador de campo de dados |
+| `0xEA` | 234 | 8x | Tag de parâmetro de efeito |
+| `0x0B` | 11 | 8x | Contador/índice de slot |
+| `0x8A` | 138 | 8x | Tag de knob/parâmetro rápido |
+| `0x44` | 68 | 6x | Tag de módulo/ID |
+| `0x01` | 1 | 4x | Flag booleano / enable |
+| `0x22` | 34 | 4x | Tag de configuração |
+| `0x0A` | 10 | 3x | Índice/contador |
+| `0x05` | 5 | 3x | Valor de configuração |
+| `0x09` | 9 | 2x | Índice |
+| `0xE9` | 233 | 2x | Tag de controle |
+| `0x83` | 131 | 2x | Tag de dados |
+| `0x12` | 18 | 2x | Valor de parâmetro |
+| `0xE5` | 229 | 2x | Tag de configuração |
+| `0x66` | 102 | 2x | Tag de dados |
+| `0x07` | 7 | 2x | Índice/valor |
+| `0x0C` | 12 | 2x | Índice |
+| `0x0D` | 13 | 2x | Índice |
+| `0xE1` | 225 | 2x | Tag de controle |
+| `0xE3` | 227 | 2x | Tag de controle |
+| `0x15` | 21 | 2x | Valor/índice |
+| `0x0E` | 14 | 2x | Valor |
+| `0x03` | 3 | 2x | Valor |
+| `0x10` | 16 | 2x | Valor |
+| `0x11` | 17 | 2x | Valor |
+| `0x13` | 19 | 2x | Valor |
+| `0x49` | 73 | 1x | — |
+| `0x8B` | 139 | 1x | — |
+| `0x92` | 146 | 1x | — |
+| `0xF` | 15 | 1x | — |
+
+**Nota**: Cada valor aparece duplicado em endereços consecutivos (ex: `0x2eabb3` e `0x2eabb4`), característica do armazenamento de Smis tagged em arrays Dart (cada elemento ocupa 8 bytes com tag de tipo).
+
+### 4.4 — Checksum
+
+**Strings encontradas:**
+- `CheckSum` em offset `0x1f2c60` (campo de dados do preset)
+- `get:_checkSum@3220832` em offset `0x21e9e0` (getter da propriedade)
+
+**Análise do algoritmo de checksum:**
+
+O checksum **não está implementado como uma função distinta no código Dart visível** no snapshot. As evidências indicam que:
+
+1. **O cálculo do checksum ocorre na biblioteca nativa FFI** (`_sendMidiMessage` na DLL nativa carregada em runtime), não no código Dart compilado. O snapshot Dart apenas passa os bytes brutos para a camada nativa, que adiciona o checksum antes do envio USB.
+
+2. **O campo `CheckSum`** no modelo `HTModelPreset` é uma propriedade de dados recebida do hardware (usada para validação na recepção, não no envio). O getter `get:_checkSum` pertence à biblioteca `@3220832` que é `dart:collection` (usada para armazenamento hash, não cálculo de checksum).
+
+3. **Não foram encontradas funções chamadas** `calcChecksum`, `crc`, `validate`, ou loops de XOR-acumulação dedicados no código do app.
+
+4. **O byte `0x25`** escrito em `[buf+0x17]` pelo encoder 7-bit em `0x2e0d44` pode funcionar como um marcador de validação embutido no encoding, mas não é um checksum tradicional.
+
+**Recomendação**: Para determinar o algoritmo exato de checksum, seria necessário analisar a **biblioteca nativa** (`.dll`/`.so`) carregada via FFI, que não está incluída no `app.so`.
+
+---
+
+## 5. MAPEAMENTO DE FXID E PARÂMETROS DE 7-BITS
+
+### 5.1 — Algoritmo de 7-bit Encoding (MSB/LSB Splitting)
+
+**Endereço da função: `0x2e0d14`**
+
+Esta é a função central que codifica valores inteiros em bytes MIDI-safe (≤ 127 bits, sem o bit 7 setado inadequadamente).
+
+#### Pseudocódigo Decodificado:
+
+```python
+def encode7bit(value):
+    """
+    Codifica um valor inteiro em bytes MIDI-safe usando grupos de 6 bits
+    com marcas de tamanho no byte mais significativo (similar a UTF-8).
+    
+    Input:  value (int) — valor a codificar
+    Output: Uint8List — bytes codificados com marcador 0x25
+    """
+    
+    if value < 0x80:  # 128 — valor cabe em 7 bits (byte único)
+        buffer = new Uint8List(6)
+        buffer[0] = 0x25                      # byte marcador constante
+        high_nibble = (value >> 4) & 0x0F     # extrai nibble alto
+        low_nibble  = value & 0x0F            # extrai nibble baixo
+        buffer[1] = lookup_table[high_nibble]  # conversão via tabela
+        buffer[2] = lookup_table[low_nibble]   # conversão via tabela
+        return buffer
+    
+    elif value <= 0x7FF:  # 2047 — 2 bytes
+        marker = 0xC0
+        num_groups = 2
+    
+    elif value <= 0xFFFF:  # 65535 — 3 bytes
+        marker = 0xE0
+        num_groups = 3
+    
+    else:  # > 65535 — 4 bytes
+        marker = 0xF0
+        num_groups = 4
+    
+    # Alocação: num_groups * 3 bytes por grupo
+    buffer_size = num_groups * 3
+    buffer = new Uint8List(buffer_size)
+    
+    # Loop de codificação: extrai 6 bits por vez, do MSB para o LSB
+    for i in range(num_groups - 1, -1, -1):
+        shift_amount = i * 6
+        six_bits = (value >> shift_amount) & 0x3F    # máscara de 6 bits
+        encoded_byte = six_bits | marker              # OR com marca de tamanho
+        
+        offset = i * 3
+        buffer[offset + 0] = 0x25                      # marcador constante
+        buffer[offset + 1] = lookup_table[(encoded_byte >> 4) & 0x0F]  # nibble alto
+        buffer[offset + 2] = lookup_table[encoded_byte & 0x0F]          # nibble baixo
+    
+    return buffer
+```
+
+#### Disassembly Completo e Anotado:
+
+```asm
+; ============================================================================
+; FUNÇÃO: encode7bit
+; ENDEREÇO: 0x2e0d14
+; INPUT: [rbp+0x10] = valor tagged Smi a codificar
+; OUTPUT: rax = ponteiro para Uint8List com bytes codificados
+; ============================================================================
+
+0x2e0d14:  push rbp
+0x2e0d15:  mov rbp, rsp
+0x2e0d18:  sub rsp, 0x28               ; 40 bytes de stack local
+0x2e0d1c:  cmp rsp, [r14 + 0x38]       ; stack overflow check
+0x2e0d20:  jbe 0x2e0f0b                ; → stack overflow handler
+
+; --- Carregar valor de entrada ---
+0x2e0d26:  mov rcx, [rbp + 0x10]       ; rcx = valor (tagged Smi)
+0x2e0d2a:  cmp rcx, 0x80               ; valor < 128?
+0x2e0d31:  jge 0x2e0d94                ; se ≥ 128, vai para multi-byte
+
+; ===== CASE 1: BYTE ÚNICO (valor < 0x80) =====
+0x2e0d37:  mov eax, 6                  ; tamanho do buffer = 6
+0x2e0d3c:  call 0x6a71fc               ; alocar Uint8List(6)
+0x2e0d41:  mov rcx, rax                ; rcx = buffer
+0x2e0d44:  mov byte [rcx + 0x17], 0x25 ; buffer[0] = 0x25 (marcador)
+
+; --- Extrair nibble alto ---
+0x2e0d48:  mov rdx, [rbp + 0x10]       ; rdx = valor original
+0x2e0d4c:  sar rdx, 4                  ; rdx >>= 4 (nibble alto, ainda tagged)
+0x2e0d50:  mov rbx, rdx
+0x2e0d53:  mov eax, 0x10               ; limite = 16
+0x2e0d58:  cmp rbx, rax                ; bounds check (nibble < 16)
+0x2e0d5b:  jae 0x2e0f17                ; → out of bounds
+
+0x2e0d61:  mov rbx, [r15 + 0x10f7]     ; carregar lookup table do pool
+0x2e0d68:  movzx rax, byte [rbx + rdx + 0xf]  ; table[nibble_alto]
+0x2e0d6e:  mov byte [rcx + 0x18], al   ; buffer[1] = table[nibble_alto]
+
+; --- Extrair nibble baixo ---
+0x2e0d71:  mov rax, [rbp + 0x10]       ; valor original
+0x2e0d75:  mov eax, eax                ; zero-extend para 32 bits
+0x2e0d77:  mov edx, 0xf                ; máscara 0x0F
+0x2e0d7c:  and eax, edx                ; nibble_baixo = valor & 0x0F
+0x2e0d7e:  mov eax, eax
+0x2e0d80:  movzx rdx, byte [rbx + rax + 0xf]  ; table[nibble_baixo]
+0x2e0d86:  mov rax, rdx
+0x2e0d89:  mov byte [rcx + 0x19], al   ; buffer[2] = table[nibble_baixo]
+0x2e0d8c:  mov rax, rcx                ; return buffer
+0x2e0d8f:  jmp 0x2e0eed                ; → finalizar
+
+; ===== CASE 2/3/4: MULTI-BYTE =====
+0x2e0d94:  mov rbx, [r15 + 0x10f7]     ; carregar lookup table
+0x2e0d9b:  mov edx, 0xf                ; máscara de nibble
+
+0x2e0da0:  cmp rcx, 0x7ff              ; valor ≤ 2047? (2 bytes)
+0x2e0da7:  jle 0x2e0dde                ; → 2-byte path
+
+0x2e0dad:  cmp rcx, 0xffff             ; valor ≤ 65535? (3 bytes)
+0x2e0db4:  jle 0x2e0dc9                ; → 3-byte path
+
+; --- 4 bytes (valor > 65535) ---
+0x2e0dba:  mov esi, 0xf0               ; marca = 0xF0
+0x2e0dbf:  mov eax, 4                  ; num_groups = 4
+0x2e0dc4:  jmp 0x2e0dd3
+
+; --- 3 bytes (valor ≤ 65535) ---
+0x2e0dc9:  mov esi, 0xe0               ; marca = 0xE0
+0x2e0dce:  mov eax, 3                  ; num_groups = 3
+0x2e0dd3:  mov rdi, rsi                ; rdi = marca
+0x2e0dd6:  mov rsi, rax                ; rsi = num_groups
+0x2e0dd9:  jmp 0x2e0de8
+
+; --- 2 bytes (valor ≤ 2047) ---
+0x2e0dde:  mov edi, 0xc0               ; marca = 0xC0
+0x2e0de3:  mov esi, 2                  ; num_groups = 2
+
+; --- Calcular tamanho do buffer ---
+0x2e0de8:  mov [rbp - 0x10], rdi       ; salvar marca
+0x2e0dec:  mov [rbp - 0x18], rsi       ; salvar num_groups
+0x2e0df0:  mov r8, rsi                 ; r8 = num_groups
+0x2e0df3:  imul r8, r8, 3              ; r8 = num_groups * 3 (tamanho buffer)
+0x2e0dfa:  mov [rbp - 8], r8           ; salvar tamanho
+0x2e0dfe:  mov rax, r8
+0x2e0e01:  add rax, rax                ; rax = tamanho * 2 (tagged Smi)
+0x2e0e04:  call 0x6a71fc               ; alocar Uint8List(num_groups * 3)
+0x2e0e09:  mov rdx, rax                ; rdx = buffer
+0x2e0e0c:  mov rbx, [rbp - 0x10]       ; rbx = marca
+0x2e0e10:  mov rax, [rbp - 0x18]       ; rax = num_groups
+0x2e0e14:  xor r9d, r9d                ; r9 = 0 (índice do loop)
+0x2e0e17:  mov rsi, [r15 + 0x10f7]     ; rsi = lookup table
+0x2e0e1e:  mov edi, 0xf                ; máscara de nibble
+0x2e0e23:  mov r8d, 0x3f               ; máscara de 6 bits (0x3F)
+
+; ===== LOOP DE CODIFICAÇÃO =====
+0x2e0e29:  cmp rsp, [r14 + 0x38]       ; stack overflow check
+0x2e0e2d:  jbe 0x2e0f1c
+
+0x2e0e33:  mov r10, rax                ; r10 = num_groups
+0x2e0e36:  sub r10, 1                  ; r10 = num_groups - 1 (índice reverso)
+0x2e0e3a:  cmp r10, 0
+0x2e0e3e:  jl 0x2e0eea                 ; se < 0, fim do loop
+
+0x2e0e44:  mov rcx, r10
+0x2e0e47:  imul rcx, rcx, 6            ; rcx = índice * 6 (shift amount)
+0x2e0e4e:  mov rax, [rbp + 0x10]       ; rax = valor original
+0x2e0e52:  cmp rcx, 0x3f               ; shift ≤ 63? (bounds check)
+0x2e0e56:  ja 0x2e0f28
+
+0x2e0e5c:  sar rax, cl                 ; rax = valor >> (índice * 6)
+0x2e0e5f:  mov eax, eax                ; zero-extend
+0x2e0e61:  and eax, r8d                ; eax = (valor >> shift) & 0x3F [6 bits]
+0x2e0e64:  mov eax, eax
+0x2e0e66:  mov rcx, rax
+0x2e0e69:  or rcx, rbx                 ; rcx = 6bits | marca (0xC0/0xE0/0xF0)
+
+; --- Escrever byte no buffer (3 bytes por grupo) ---
+0x2e0e6c:  mov rax, [rbp - 8]          ; tamanho do buffer
+0x2e0e70:  mov rbx, r9                 ; rbx = índice linear
+0x2e0e73:  cmp rbx, rax                ; bounds check
+0x2e0e76:  jae 0x2e0f5e
+
+0x2e0e7c:  mov byte [rdx + r9 + 0x17], 0x25  ; buffer[idx+0] = 0x25 (marcador)
+
+0x2e0e82:  mov r12, r9
+0x2e0e85:  add r12, 1                  ; próximo índice
+0x2e0e89:  mov rax, rcx                ; byte codificado
+0x2e0e8c:  sar rax, 4                  ; nibble alto = byte >> 4
+0x2e0e90:  movzx r13, byte [rsi + rax + 0xf]  ; table[nibble_alto]
+; ... (escreve buffer[idx+1])
+0x2e0ea9:  mov byte [rdx + r12 + 0x17], al    ; buffer[idx+1] = table[nibble_alto]
+
+0x2e0eb1:  add r12, 2                  ; índice + 2
+0x2e0eb5:  mov ecx, ecx
+0x2e0eb7:  and ecx, edi                ; nibble baixo = byte & 0x0F
+0x2e0ebb:  movzx r13, byte [rsi + rcx + 0xf]  ; table[nibble_baixo]
+; ... (escreve buffer[idx+2])
+0x2e0ed4:  mov byte [rdx + r12 + 0x17], al    ; buffer[idx+2] = table[nibble_baixo]
+
+0x2e0ed9:  add r9, 3                   ; índice += 3 (próximo grupo)
+0x2e0edd:  mov rax, r10                ; rax = índice reverso
+0x2e0ee0:  mov ebx, 0x80               ; constante para próxima iteração
+0x2e0ee5:  jmp 0x2e0e29                ; →continuar loop
+
+; ===== FIM DO LOOP =====
+0x2e0eea:  mov rax, rdx                ; return buffer
+
+; ===== FINALIZAR E ENVIAR =====
+0x2e0eed:  mov r11, [r14 + 0x68]       ; carregar null sentinel
+0x2e0ef1:  mov [rsp + 8], r11
+0x2e0ef6:  mov [rsp], rax              ; argumento: buffer
+0x2e0efa:  mov r10, [r15 + 0x14f]      ; carregar função do pool
+0x2e0f01:  call 0x2e0f70               ; dispatch (enviar/processar)
+0x2e0f06:  mov rsp, rbp
+0x2e0f09:  pop rbp
+0x2e0f0a:  ret
+```
+
+### 5.2 — Tabela de Lookup (Nibble → MIDI-safe)
+
+A tabela está armazenada no Object Pool em `[r15 + 0x10f7]` e é acessada como `byte ptr [table_base + nibble + 0xf]`.
+
+**Primeiros 16 bytes da tabela (índices 0–15):**
+
+```
+Índice:  0    1    2    3    4    5    6    7    8    9    10   11   12   13   14   15
+Valor:   83   84   82   82   84   84   83   82   82   83   83   83   82   83   83   85
+```
+
+**Interpretação:** Estes valores são entries do Dart Object Pool (class IDs / tags). O acesso `byte [base + idx + 0xf]` lê o byte de dados de um objeto no pool (provavelmente um `OneByteString` ou `Smi` armazenado como constante). A tabela converte cada nibble (0–15) em um byte seguro para transmissão MIDI, garantindo que o resultado não conflite com bytes de controle SysEx.
+
+### 5.3 — Fragmentação de FXID de 32-bits
+
+**Endereço do chamador: `0x2e0028`** (primeiro chamador do encoder 7-bit)
+
+O FXID de 32 bits (campo `fxid` no modelo de dados) é pré-processado antes de passar ao encoder 7-bit:
+
+#### Disassembly Anotado (trechos chave):
+
+```asm
+; --- Extrair campos de 10 bits do FXID ---
+0x2e03ab:  mov edx, 0x3ff              ; máscara de 10 bits (0x3FF = 1023)
+0x2e03ba:  shl rbx, 0xa                ; shift left 10 — combina campos de 10 bits
+0x2e03be:  or  rbx, 0x10000            ; seta bit 16 — marca como valor multi-byte
+
+; --- Outras operações de bit ---
+0x2e0102:  shr ebx, 0xc                ; shift right 12 (extrai bits 12-23)
+0x2e0126:  cmp rdx, 0x7f               ; verifica limite de 7 bits
+0x2e013c:  sar rcx, 4                  ; shift right 4 (extrai nibble)
+0x2e016d:  shl ebx, cl                 ; shift left dinâmico (remontagem)
+0x2e01a5:  cmp rdx, 0x25               ; compara com manufacturer ID 0x25
+
+; --- Chamar encoder 7-bit ---
+0x2e0421:  call 0x2e0d14               ; → encode7bit(valor_composto)
+```
+
+#### Algoritmo de Fragmentação de FXID (pseudocódigo):
+
+```python
+def fragment_fxid(fxid_32bit):
+    """
+    Fragmenta um FXID de 32 bits em grupos de 10 bits,
+    marca como multi-byte, e passa ao encoder 7-bit.
+    """
+    # Extrai campos de 10 bits
+    field1 = fxid_32bit & 0x3FF         # bits 0-9
+    field2 = (fxid_32bit >> 10) & 0x3FF # bits 10-19
+    
+    # Combina os campos
+    combined = (field2 << 10) | field1
+    
+    # Marca como multi-byte (bit 16)
+    combined = combined | 0x10000
+    
+    # Passa ao encoder 7-bit que usa grupos de 6 bits
+    # com marcas 0xC0/0xE0/0xF0
+    return encode7bit(combined)
+```
+
+### 5.4 — Pipeline de Envio Completo
+
+```
+[Interface do Usuário]
+    │
+    ▼
+[algKnobChangeSyncValue / switchEffect / writeParameter / etc.]
+    │  Parâmetros: slotIndex, fxid, paramIndex, value
+    │
+    ▼
+[Fragmentação de FXID]
+    │  shr 0xc, shl 0xa, or 0x10000, & 0x3FF
+    │  (verifica cmp 0x25 e cmp 0x7f)
+    │
+    ▼
+[encode7bit() — função em 0x2e0d14]
+    │  1. new Uint8List(n) via 0x6a71fc
+    │  2. Escreve 0x25 como marcador em cada grupo
+    │  3. Divide em grupos de 6 bits (& 0x3F)
+    │  4. Adiciona marca de tamanho (0xC0/0xE0/0xF0)
+    │  5. Converte nibbles via lookup table
+    │  Retorna: Uint8List com bytes codificados
+    │
+    ▼
+[List.add() — função em 0x2e0774]
+    │  Acumula bytes na mensagem SysEx cresível
+    │  (expande buffer quando atinge 0x80 elementos)
+    │
+    ▼
+[sendMIDIMessage()]
+    │
+    ▼
+[_sendMidiMessage@590500129] (FFI Nativo)
+    │
+    ▼
+[Driver USB-MIDI]
+    │  Converte para USB-MIDI Event Packets (4 bytes cada)
+    │  Cabeçalho SysEx: F0 21 25 4D 50 00 [cmd] [data...] [chk] F7
+    │
+    ▼
+[Hardware Matribox II Pro]
+```
+
+### 5.5 — Funções Auxiliares Identificadas
+
+| Endereço | Função | Descrição |
+|---|---|---|
+| `0x6a71fc` | `new Uint8List(n)` | Alocador de array de bytes tipado |
+| `0x2e0774` | `List.add()` | Adiciona elemento a lista cresível |
+| `0x2e0b4c` | `List.isEmpty check` | Verifica se lista está vazia (`[rcx + 0x2f]`) |
+| `0x2e0b00` | `new List(10)` | Cria nova lista vazia (capacidade inicial 10) |
+| `0x2e0c98` | `createMessageWrapper` | Cria objeto wrapper de mensagem |
+| `0x2e0f70` | `variadicDispatch` | Despachador de argumentos variádicos |
+| `0x2e0d08` | `createMessageObject` | Criação de objeto de mensagem |
+| `0x2dfac0` | `buildSysExMessage` | Constrói mensagem SysEx (usa pool entry `[r15 + 0x217]`) |
+| `0x2dfa2c` | `buildSysExVariant` | Variante do construtor de mensagem |
+| `0x2e0930` | `growList` | Expansão de buffer quando lista atinge 0x80 elementos |
+| `0x2e2004` | `processList` | Processa lista de elementos (iteração) |
+| `0x2cd89c` | `growArray` | Crescimento de array interno |
+| `0x6a5f88` | `storeBarrier` | Store barrier (GC write barrier) |
+| `0x6a6261` | `storeBarrier2` | Segundo store barrier |
+| `0x6a7720` | `allocateSmi` | Aloca Smi (inteiro pequeno tagged) |
+
+---
+
+## 6. CÓDIGOS HEXADECIMAIS BRUTOS
+
+### 6.1 — Bytes Confirmados como Imediatos no Código
+
+| Byte Hex | Decimal | Endereço(s) no .text | Contexto de Uso |
+|---|---|---|---|
+| `0x25` | 37 | `0x2e0d44`, `0x2e0e7c` | Marcador constante escrito em cada grupo do output codificado |
+| `0xC0` | 192 | `0x2e0dde` | Marca de 2-byte encoding (valor ≤ 0x7FF = 2047) |
+| `0xE0` | 224 | `0x2e0dc9` | Marca de 3-byte encoding (valor ≤ 0xFFFF = 65535) |
+| `0xF0` | 240 | `0x2e0dba` | Marca de 4-byte encoding (valor > 0xFFFF) |
+| `0x3F` | 63 | `0x2e0e23` | Máscara de 6 bits para extração de grupos |
+| `0x0F` | 15 | `0x2e0d77`, `0x2e0134` | Máscara de nibble (4 bits) |
+| `0x80` | 128 | `0x2e0d2a`, `0x2e0ee0` | Limite de byte único |
+| `0x7FF` | 2047 | `0x2e0da0` | Limite de 2-byte encoding |
+| `0xFFFF` | 65535 | `0x2e0dad` | Limite de 3-byte encoding |
+| `0x3FF` | 1023 | `0x2e03ab` | Máscara de 10 bits para fragmentação de FXID |
+| `0x10000` | 65536 | `0x2e03be` | Marca de multi-byte (bit 16) |
+| `0x60` | 96 | `0x2eaac2` | Tamanho do bloco de dados do preset |
+| `0x16` | 22 | `0x2eaa10` | Número de slots na cadeia de efeitos |
+| `0x1C2` | 450 | `0x2eaaf4` | Tamanho/comando total do dump SysEx |
+| `0x0A` | 10 | `0x2e0b08` | Capacidade inicial de lista |
+| `0x5B` | 91 | `0x2e2020` | Comparação de limite (tipo de dado?) |
+| `0x5C` | 92 | `0x2e0236` | Comparação de limite |
+| `0x5D` | 93 | `0x2e0271` | Comparação de limite |
+| `0x1F` | 31 | `0x2e0163` | Comparação de limite de shift |
+
+### 6.2 — Bytes como Tagged Smis no Object Pool
+
+| Byte | Tagged Smi (val<<1) | Ocorrências no Pool | Notas |
+|---|---|---|---|
+| `0x21` | `0x42` | 215 | Manufacturer ID — amplamente referenciado no pool |
+| `0x25` | `0x4A` | 155 | Manufacturer ID 2 — também hardcodeado como imediato direto |
+| `0x4D` | `0x9A` | 12 | ASCII 'M' (de "Matribox" / "MP") |
+| `0x50` | `0xA0` | 14 | ASCII 'P' (de "MP" / "Preset") |
+| `0xF7` | `0x1E0` | 1 (em `0x2786b8`) | EOX (End of Exclusive) |
+| `0xF0` | `0x1E0` | **0** | SysEx Start — NÃO encontrado como Smi (computado em runtime) |
+| `0x7F` | `0xFE` | 6 | Máscara de 7 bits |
+| `0x00` | `0x00` | muitos | Device ID zero / valores nulos |
+
+### 6.3 — Pool Offsets Importantes (acessados via `mov reg, [r15 + offset]`)
+
+| Offset do Pool | Endereço de Acesso | Conteúdo Provável |
+|---|---|---|
+| `0x10f7` | `0x2e0d61`, `0x2e0d94`, `0x2e0e17` | Lookup table para conversão de nibbles |
+| `0x14f` | `0x2e0efa` | Função de dispatch/envio |
+| `0x217` | `0x2e04b5`, `0x2e4407`, `0x2e5a73` | Referência de método (provável `sendMIDIMessage`) |
+| `0x277` | `0x2e0473` | Referência de método/construtor |
+| `0x20f` | `0x2e01f4` | Constante/comando do pool |
+| `0x3a7` | `0x2e02dc` | Referência de classe |
+| `0x877` | `0x2e07bd` | Referência de função (expansão de lista) |
+| `0x1027` | `0x2e024e` | Constante do pool |
+| `0x113f` | `0x2e006e` | Referência de classe/tipo |
+| `0x114f` | `0x2e0211` | Constante do pool |
+| `0x1157` | `0x2e027b` | Referência de método |
+| `0x14d7` | `0x2eaa1f` | Referência de função |
+| `0x14df` | `0x2eab0d` | Referência de função |
+
+---
+
+## 7. OBSERVAÇÕES CRÍTICAS
+
+### 7.1 — Assinatura SysEx
+
+**A assinatura SysEx `F0 21 25 4D 50 00` não existe como sequência contígua em nenhum lugar do binário.** Cada byte é carregado individualmente do Object Pool em tempo de execução ou computado via aritmética. O byte `0x25` é o único que aparece como imediato direto no código (no encoder 7-bit em `0x2e0d44`), onde serve como marcador do protocolo de encoding interno, não necessariamente como o byte do cabeçalho SysEx.
+
+### 7.2 — Encoding 7-bit Não-Padrão
+
+O encoder 7-bit **não usa o padrão tradicional MIDI de `& 0x7F` / `>> 7`**. Em vez disso, usa:
+- **Grupos de 6 bits** (`& 0x3F`) em vez de 7 bits
+- **Marcas de tamanho** no byte mais significativo (`0xC0` = 2 bytes, `0xE0` = 3 bytes, `0xF0` = 4 bytes) — similar ao encoding de comprimento variável do UTF-8
+- **Tabela de lookup** para converter nibbles em bytes MIDI-safe
+- **Byte marcador `0x25`** escrito em cada grupo de 3 bytes do output
+
+### 7.3 — Checksum
+
+O checksum **não está implementado no código Dart visível** no snapshot. É provavelmente computado na biblioteca nativa FFI (`_sendMidiMessage`) antes do envio USB. O campo `CheckSum` no modelo de dados é uma propriedade do preset recebido do hardware, usada para validação na recepção.
+
+### 7.4 — Fragmentação de FXID
+
+A fragmentação de FXID de 32 bits usa **campos de 10 bits** (`& 0x3FF`) combinados via shift-left-10, com bit 16 setado como flag de multi-byte, antes de passar ao encoder 7-bit que reduz cada grupo a 6 bits por byte com marca de tamanho.
+
+### 7.5 — Identificação USB
+
+O hardware é identificado por `vendorId`/`productId` (campos em `GlobalDataDevice`), filtrados durante `_scanInDevice`/`_scanOutDevice`. Os valores numéricos exatos não estão no snapshot Dart — são configurados em runtime ou na biblioteca nativa.
+
+### 7.6 — Máquina de Estados (FSM)
+
+O app usa uma máquina de estados finita para gerenciar tarefas assíncronas (importar IR, importar Clone, carregar presets). Cada tarefa é enfileirada e processada sequencialmente, com timeouts e tratamento de erros. O FSM tem estados identificados pelos prefixos `vh*` e mensagens de log `[FSM]*`.
+
+### 7.7 — Limite da Análise
+
+Esta análise cobre apenas o snapshot Dart AOT (`app.so`). A biblioteca nativa carregada via FFI (que contém o envio USB-MIDI real, o cálculo de checksum, e a identificação VID/PID do dispositivo) **não está incluída neste arquivo** e precisaria ser analisada separadamente para revelar:
+- O algoritmo exato de checksum
+- Os valores de vendorId/productId USB
+- A construção do cabeçalho SysEx completo (F0 21 25 4D 50 00)
+- O formato dos USB-MIDI Event Packets
+- O mapeamento final de bytes para endpoints USB
+
+---
+
+## 8. APÊNDICE: ENDEREÇOS DE MEMÓRIA
+
+### 8.1 — Funções Principais no .text
+
+| Endereço | Função | Biblioteca |
+|---|---|---|
+| `0x2e0d14` | `encode7bit()` | App (qme_200) |
+| `0x2e0028` | Caller 1 — Builder de SysEx com FXID | App |
+| `0x2e3c04` | Caller 2 — Builder de SysEx (params) | App |
+| `0x2e5500` | Caller 3 — Builder de SysEx (preset) | App |
+| `0x2e0774` | `List.add()` | Dart core |
+| `0x2e0b4c` | `List.isEmpty check` | Dart core |
+| `0x2e0b00` | `new List(10)` | Dart core |
+| `0x2e0c98` | `createMessageWrapper` | App |
+| `0x2e0f70` | `variadicDispatch` | Dart core |
+| `0x2e0f01` | Call to dispatch after encoding | App |
+| `0x2eaa08` | `buildPresetMatrix()` | App |
+| `0x2dfac0` | `buildSysExMessage()` | App |
+| `0x2dfa2c` | `buildSysExVariant()` | App |
+| `0x2e2004` | `processList()` | App |
+| `0x6a71fc` | `new Uint8List(n)` | Dart VM |
+| `0x6a7720` | `allocateSmi()` | Dart VM |
+| `0x6a5f88` | `storeBarrier()` | Dart VM (GC) |
+| `0x6a6261` | `storeBarrier2()` | Dart VM (GC) |
+| `0x6a4f30` | `getType()` | Dart VM |
+| `0x6a5cf4` | `checkType()` | Dart VM |
+| `0x6a5f68` | `invokeMethod()` | Dart VM |
+| `0x6a74a4` | `getTypeEntry()` | Dart VM |
+| `0x6a79d8` | `throwError()` | Dart VM |
+| `0x6a7b18` | `stackOverflow()` | Dart VM |
+
+### 8.2 — Offsets de Strings Importantes no .rodata
+
+| String | Offset no binário | Offset no all_strings.txt |
+|---|---|---|
+| `sendMIDIMessage` | `0x16c216` | `0x15b55` |
+| `_sendMidiMessage@590500129` | `0x16c215` | `0x8964` |
+| `switchEffect` | `0x25c5e8` | `0xf1c8` |
+| `readEffectData` | `0x216171` | `0x7b51` |
+| `writeParameter` | `0x16c3a6` | `0x15b8c` |
+| `requestPresetWithIndex` | `0x370cc1` | `0x2c83d` |
+| `CheckSum` | `0x1f2c60` | `0x4bab2` |
+| `HTModelPreset.decodefunc` | `0x1a719e` | `0x26cae` |
+| `fxid` | `0x1dd1a0` | — |
+| `moduleId` | `0x1de5b0` | — |
+| `deviceId` | `0x1f8870` | — |
+| `vendorId` | `0x214830` | — |
+| `productId` | `0x211bd0` | — |
+
+### 8.3 — Seções ELF
+
+| Seção | Endereço | Tamanho | Permissões |
+|---|---|---|---|
+| `.note.gnu.build-id` | `0x01c8` | 32 bytes | — |
+| `.rodata` (VM data) | `0x0200` | 35.040 bytes | R-- |
+| `.rodata` (Isolate data) | `0x8b00` | 2.844.656 bytes | R-- |
+| `.text` (VM instr) | `0x2c0000` | 26.112 bytes | R-X |
+| `.text` (Isolate instr) | `0x2c6600` | 4.085.456 bytes | R-X |
+| `.hash` | `0x2bdb50` | — | R-- |
+| `.dynsym` | `0x2bdac0` | 144 bytes | R-- |
+| `.dynstr` | `0x2bda38` | 133 bytes | R-- |
+| `.dynamic` | `0x6b0030` | 120 bytes | RW- |
+
+---
+
+*Fim do Relatório*
