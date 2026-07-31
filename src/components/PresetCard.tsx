@@ -1,27 +1,14 @@
 import type { GeneratedPreset } from '../lib/types';
-import type { MidiCommand } from '../lib/midiBuilder';
 import SignalChain from './SignalChain';
-import { Music2, Volume2, Layers, Loader2, Usb, CheckCircle2, Radio, Zap } from 'lucide-react';
+import { Music2, Volume2, Layers, Loader2 } from 'lucide-react';
 
 interface Props {
   preset: GeneratedPreset | null;
   loading: boolean;
-  injecting: boolean;
-  injected: boolean;
   onParamChange: (moduleIndex: number, paramIndex: number, value: number) => void;
-  onReinject: () => void;
-  midiCommands: MidiCommand[];
 }
 
-export default function PresetCard({
-  preset,
-  loading,
-  injecting,
-  injected,
-  onParamChange,
-  onReinject,
-  midiCommands,
-}: Props) {
+export default function PresetCard({ preset, loading, onParamChange }: Props) {
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -45,7 +32,7 @@ export default function PresetCard({
         </div>
         <p className="text-slate-400 text-sm font-medium">Nenhum preset gerado ainda</p>
         <p className="text-slate-600 text-xs mt-1 max-w-xs">
-          Descreva um timbre na barra acima e a IA enviará os comandos MIDI via USB
+          Descreva um timbre na barra acima e a IA montará a cadeia de pedais ideal
         </p>
       </div>
     );
@@ -83,78 +70,8 @@ export default function PresetCard({
               {preset.modules.length}
             </span>
           </div>
-
-          {/* Injection status / re-inject */}
-          <div className="ml-auto flex items-center gap-2">
-            {injecting ? (
-              <span className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary-500/10 border border-primary-500/30 text-primary-300 text-xs font-semibold">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Injetando...
-              </span>
-            ) : injected ? (
-              <button
-                onClick={onReinject}
-                className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-gradient-to-r from-cyan-400 to-sky-500 text-bg-900 font-bold text-xs hover:shadow-lg hover:shadow-cyan-500/20 transition-all"
-              >
-                <Usb className="w-4 h-4" />
-                Reenviar USB
-              </button>
-            ) : (
-              <button
-                onClick={onReinject}
-                disabled={midiCommands.length === 0}
-                className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-primary-500 text-bg-900 font-bold text-xs disabled:opacity-40 disabled:cursor-not-allowed hover:bg-primary-400 transition-all"
-              >
-                <Usb className="w-4 h-4" />
-                Enviar USB
-              </button>
-            )}
-          </div>
         </div>
-
-        {/* SAVE warning */}
-        {injected && (
-          <div className="mt-4 flex items-start gap-3 rounded-xl border border-success-500/30 bg-success-500/5 px-4 py-3">
-            <CheckCircle2 className="w-5 h-5 text-success-400 shrink-0 mt-0.5" />
-            <p className="text-sm text-slate-300 leading-relaxed">
-              Timbre injetado via USB em tempo real. Se gostar do som, pressione o botão físico{' '}
-              <span className="font-bold text-white">SAVE</span> na pedaleira para gravar permanentemente.
-            </p>
-          </div>
-        )}
       </div>
-
-      {/* MIDI command activity log */}
-      {midiCommands.length > 0 && (
-        <div className="rounded-2xl bg-bg-900 border border-border p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Radio className="w-4 h-4 text-primary-400" />
-            <h3 className="text-muted text-xs font-bold uppercase tracking-wide">
-              Comandos MIDI enviados ({midiCommands.length})
-            </h3>
-          </div>
-          <div className="space-y-1 max-h-48 overflow-y-auto font-mono text-xs">
-            {midiCommands.map((cmd, i) =>
-              cmd.type === 'sysex' ? (
-                <div key={i} className="flex items-center gap-3 py-0.5">
-                  <span className="text-amber-400 w-20 shrink-0 flex items-center gap-1">
-                    <Zap className="w-3 h-3" />
-                    SysEx
-                  </span>
-                  <span className="text-slate-500 w-10 shrink-0 tabular-nums">{cmd.bytes.length}B</span>
-                  <span className="text-muted truncate">{cmd.label}</span>
-                </div>
-              ) : (
-                <div key={i} className="flex items-center gap-3 py-0.5">
-                  <span className="text-primary-400 w-20 shrink-0">CC{cmd.cc}</span>
-                  <span className="text-slate-300 w-10 shrink-0 tabular-nums">{cmd.value}</span>
-                  <span className="text-muted truncate">{cmd.label}</span>
-                </div>
-              ),
-            )}
-          </div>
-        </div>
-      )}
 
       <SignalChain modules={preset.modules} onParamChange={onParamChange} />
     </div>
