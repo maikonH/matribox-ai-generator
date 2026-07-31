@@ -1,0 +1,67 @@
+// Function returns an integer status/result code
+int
+FUN_180084e70(
+   // Context pointer for session/state information
+   void_ptr context,
+   // Output buffer pointer (passed to final copy function)
+   void_ptr data_out,
+   // 32-bit value to encode in big-endian nibbles
+   unsigned int value,
+   // Input data buffer to be framed
+   void_ptr data_in,
+   // Length of input data in bytes
+   int data_length,
+   // Result/output buffer handle for final copy operation
+   int result
+)
+{
+   BufferState state;
+   unsigned char *temp_buffer;
+   unsigned char checksum;
+   int index;
+   long total_length;
+   // Zero-initialize the BufferState structure
+   XMLParserBase64Tool::alloc(&state, 0, sizeof(state));
+   // Copy fixed protocol header into buffer
+   memcpy(state.buffer, some_header_data, sizeof(some_header_data));
+   // Append header size to state tracking
+   append_nibble(&state, sizeof(some_header_data));
+   // Append message type identifier (0x11 = 17)
+   append_nibble(&state, 17);
+   // Append most significant byte of value
+   append_nibble(&state, value >> 24);
+   append_nibble(&state, value >> 16);
+   append_nibble(&state, value >> 8);
+   // Append least significant byte of value, completing big-endian encoding
+   append_nibble(&state, value);
+   // Loop over each input byte to convert to nibbles
+   for (index = 0; index < data_length; index++) {
+       // Extract and append high nibble (upper 4 bits)
+       append_nibble(&state, get_byte(data_in, index) >> 4);
+       // Extract and append low nibble (lower 4 bits)
+       append_nibble(&state, get_byte(data_in, index) & 15);
+   }
+   // Calculate total payload length: header (5) + type (1) + value (4) + data nibbles (data_length * 2) = data_length * 2 + 10... note: actual appears to be +12 accounting for size field
+   total_length = data_length * 2 + 12;
+   // Allocate temporary buffer for checksum calculation
+   temp_buffer = alloc_buffer(total_length);
+   // Copy built frame to temporary buffer
+   memcpy(temp_buffer, state.buffer, total_length);
+   // Initialize checksum accumulator to zero
+   checksum = 0;
+   // Iterate over all payload bytes to compute checksum
+   for (index = 0; index < total_length; index++) {
+       // Add byte value plus one to running checksum sum
+       checksum += temp_buffer[index] + 1;
+   }
+   // Append high nibble of final checksum
+   append_nibble(&state, checksum >> 4);
+   // Append low nibble of final checksum
+   append_nibble(&state, checksum & 15);
+   // Copy completed frame with checksum to result output buffer
+   FUN_18009bcb0(result, state.buffer, state.buffer_size);
+   // Free the internally allocated buffer
+   free_buffer(state.buffer);
+   // Return result handle from copy operation
+   return result;
+}
