@@ -141,21 +141,24 @@ function buildHeader(seed: number, checksum: number, payloadSize: number): Uint8
 // ── Encapsulation ────────────────────────────────────────────────────────────
 
 /**
- * Render a byte array as a JSON integer-array string, e.g. "[3,2,0,0,16,...]".
- * Uses Array.join(",") so numbers can never concatenate into invalid tokens
- * like "0916". This is the exact text shape the Sonicake editor Base64-decodes.
+ * Convert a Uint8Array to a Base64 string via direct binary encoding.
+ * Chunks the spread to avoid call-stack overflow on large payloads.
  */
-function bytesToIntArrayString(bytes: Uint8Array): string {
-  return '[' + Array.from(bytes).join(',') + ']';
+function bytesToBase64(bytes: Uint8Array): string {
+  const CHUNK = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
 }
 
 /**
  * Build a complete .prst file from a generated preset.
  *
- * Returns the file body — a Base64 string of the JSON integer-array text —
- * ready to be saved with a `.prst` extension and imported directly into the
- * official Sonicake editor. The output is byte-for-byte compatible with the
- * factory preset format (see src/data/01-B_Love_of_God.prst).
+ * Pipeline: preset JSON → compact string → UTF-8 bytes → Adler-32 checksum
+ * → 20-byte header → selective LCG XOR cipher → header+payload → Base64 →
+ * factory envelope `{ "version": 1, "data": base64Data }`.
  */
 export function buildPresetFile(preset: GeneratedPreset): string {
   const presetObj = buildPresetJson(preset);
@@ -169,12 +172,12 @@ export function buildPresetFile(preset: GeneratedPreset): string {
   const crypto = new MatriboxCrypto(seed);
   const encryptedPayload = crypto.transform(jsonBytes);
 
-  const combined = new Uint8Array(header.length + encryptedPayload.length);
-  combined.set(header, 0);
-  combined.set(encryptedPayload, header.length);
+  const finalBytes = new Uint8Array(header.length + encryptedPayload.length);
+  finalBytes.set(header, 0);
+  finalBytes.set(encryptedPayload, header.length);
 
-  const intArrayString = bytesToIntArrayString(combined);
-  return btoa(intArrayString);
+  const base64Data = bytesToBase64(finalBytes);
+  return JSON.stringify({ version: 1, data: base64Data });
 }
 
 /**
