@@ -132,7 +132,7 @@ export interface DiffResult {
   changedLen: number;
 }
 
-// Signature layout (matches midiBuilder.ts): F0 21 25 4D 50 00 = 6 bytes.
+// Signature layout: F0 21 25 4D 50 00 = 6 bytes.
 const SIG_LEN = 6;
 // Matrix = 12 slots × 8 bytes (4 fxid + 4 knobs) = 96; then 1 checksum + 1 F7.
 const MATRIX_BYTES = 96;

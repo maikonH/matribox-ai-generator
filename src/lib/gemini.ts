@@ -162,8 +162,7 @@ export function validateAiResponse(ai: AiPresetResponse, catalog: Algorithm[]): 
     }
     // Stamp the real numeric FXID from alg_data.json onto the entry. This is
     // the single point where the catalog confirms an effect exists, so the
-    // FXID travels downstream with the validated chain and the MIDI builder
-    // injects it directly into SysEx bytes 59–60 without re-resolving by name.
+    // FXID travels downstream with the validated chain to the .prst builder.
     entry.fxid = Number(alg.fxId);
     if (entry.knobs.length !== alg.params.length) {
       errors.push(
@@ -181,8 +180,7 @@ export function validateAiResponse(ai: AiPresetResponse, catalog: Algorithm[]): 
 /**
  * Project the validated AI response onto the UI. Returns ONLY the modules the
  * AI actually activated, in the order the AI returned them — the UI renders
- * exactly this list and nothing else. The 10-slot padding with zeroed bypass
- * blocks happens exclusively inside buildPresetFile, never here.
+ * exactly this list and nothing else.
  */
 export function aiResponseToPreset(ai: AiPresetResponse, catalog: Algorithm[]): GeneratedPreset {
   const byTitle = new Map(catalog.map((a) => [normalizeForCompare(a.fxTitle), a]));

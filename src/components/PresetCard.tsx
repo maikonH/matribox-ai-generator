@@ -1,6 +1,7 @@
 import type { GeneratedPreset } from '../lib/types';
 import SignalChain from './SignalChain';
-import { Music2, Volume2, Layers, Loader2 } from 'lucide-react';
+import { downloadPresetFile } from '../lib/presetBuilder';
+import { Music2, Volume2, Layers, Loader2, Download } from 'lucide-react';
 
 interface Props {
   preset: GeneratedPreset | null;
@@ -52,7 +53,7 @@ export default function PresetCard({ preset, loading, onParamChange }: Props) {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-3 pt-4 border-t border-border">
+        <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-border">
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-light border border-border">
             <Volume2 className="w-4 h-4 text-primary-400" />
             <span className="text-xs text-muted">Vol:</span>
@@ -70,6 +71,13 @@ export default function PresetCard({ preset, loading, onParamChange }: Props) {
               {preset.modules.length}
             </span>
           </div>
+          <button
+            onClick={() => downloadPresetFile(preset)}
+            className="ml-auto flex items-center gap-2 h-9 px-4 rounded-lg bg-gradient-to-r from-cyan-400 to-sky-500 text-slate-950 font-bold text-xs hover:shadow-lg hover:shadow-cyan-500/20 transition-all"
+          >
+            <Download className="w-4 h-4" />
+            Baixar Preset Seguro (.prst)
+          </button>
         </div>
       </div>
 

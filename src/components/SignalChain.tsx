@@ -7,9 +7,8 @@ interface Props {
 }
 
 export default function SignalChain({ modules, onParamChange }: Props) {
-  // Render ONLY the modules the AI generated. The 10-slot hardware padding
-  // lives entirely inside buildPresetFile (the .prst download motor); the UI
-  // never shows bypass placeholders.
+  // Render ONLY the modules the AI generated. The .prst builder handles any
+  // hardware padding internally; the UI never shows bypass placeholders.
   return (
     <div>
       <div className="flex items-center gap-2 mb-4">
