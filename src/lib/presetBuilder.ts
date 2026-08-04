@@ -140,21 +140,22 @@ function buildHeader(seed: number, checksum: number, payloadSize: number): Uint8
 
 // ── Encapsulation ────────────────────────────────────────────────────────────
 
+/**
+ * Render a byte array as a JSON integer-array string, e.g. "[3,2,0,0,16,...]".
+ * Uses Array.join(",") so numbers can never concatenate into invalid tokens
+ * like "0916". This is the exact text shape the Sonicake editor Base64-decodes.
+ */
 function bytesToIntArrayString(bytes: Uint8Array): string {
-  let out = '[';
-  for (let i = 0; i < bytes.length; i++) {
-    if (i > 0) out += ',';
-    out += String(bytes[i]);
-  }
-  out += ']';
-  return out;
+  return '[' + Array.from(bytes).join(',') + ']';
 }
 
 /**
  * Build a complete .prst file from a generated preset.
  *
- * Returns the file body (a JSON string) ready to be saved with a `.prst`
- * extension and imported directly into the official Sonicake editor.
+ * Returns the file body — a Base64 string of the JSON integer-array text —
+ * ready to be saved with a `.prst` extension and imported directly into the
+ * official Sonicake editor. The output is byte-for-byte compatible with the
+ * factory preset format (see src/data/01-B_Love_of_God.prst).
  */
 export function buildPresetFile(preset: GeneratedPreset): string {
   const presetObj = buildPresetJson(preset);
@@ -173,10 +174,7 @@ export function buildPresetFile(preset: GeneratedPreset): string {
   combined.set(encryptedPayload, header.length);
 
   const intArrayString = bytesToIntArrayString(combined);
-  const base64 = btoa(intArrayString);
-
-  const wrapper = { version: 1, data: base64 };
-  return JSON.stringify(wrapper);
+  return btoa(intArrayString);
 }
 
 /**
