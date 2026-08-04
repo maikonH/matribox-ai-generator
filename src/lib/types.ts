@@ -61,3 +61,27 @@ export interface ValidationResult {
   error?: string;
   count: number;
 }
+
+// ── AI ↔ Engine contract ─────────────────────────────────────────────────────
+// These types form the ONLY bridge between the AI generator (gemini.ts) and
+// the .prst engine (presetBuilder.ts). They live here, on neutral ground, so
+// neither layer has to import the other: the AI produces an AiPresetResponse,
+// the UI projects it to GeneratedPreset, and the engine consumes the
+// GeneratedPreset. The engine never reads these types directly.
+
+export interface ChainEntry {
+  modulo: string;
+  nomeEfeito: string;
+  knobs: number[];
+  /**
+   * The real numeric FXID resolved from alg_data.json during validation.
+   * Stamped by validateAiResponse and consumed downstream by the engine.
+   */
+  fxid?: number;
+}
+
+export interface AiPresetResponse {
+  nomePatch: string;
+  comentario: string;
+  cadeia: ChainEntry[];
+}

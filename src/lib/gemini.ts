@@ -1,8 +1,21 @@
+// ────────────────────────────────────────────────────────────────────────────
+// AI TONE GENERATOR  (gemini.ts)
+// ────────────────────────────────────────────────────────────────────────────
+// This module is the ONLY code that talks to the Gemini model. Its exclusive
+// job: read the user's prompt, consult the alg_data.json catalog projection,
+// and emit a clean AiPresetResponse (which pedals to activate + knob values).
+//
+// It MUST NOT generate bytes, compute cryptography, do Base64, or assemble the
+// final .prst file — that is the exclusive job of presetBuilder.ts (the frozen
+// engine). The two layers communicate only through the neutral types
+// (AiPresetResponse / GeneratedPreset) declared in types.ts. This file never
+// imports presetBuilder.ts.
+// ────────────────────────────────────────────────────────────────────────────
+
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import type { Algorithm, GeneratedPreset, PresetModule } from './types';
+import type { Algorithm, GeneratedPreset, PresetModule, AiPresetResponse, ChainEntry } from './types';
 import { ALGORITHM_CATALOG } from './algorithmCatalog';
 import { getEffectiveApiKey } from './apiKeyStore';
-import type { AiPresetResponse, ChainEntry } from './presetBuilder';
 import { findSlotForCode } from './hardwareSlots';
 
 const MODEL_NAME = 'gemini-3.1-flash-lite';

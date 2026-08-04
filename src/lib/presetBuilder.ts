@@ -1,38 +1,28 @@
-// .prst file engine for the Matribox II Pro.
+// ════════════════════════════════════════════════════════════════════════════
+// MATRIBOX II PRO — .prst ENGINE  (FROZEN)
+// ════════════════════════════════════════════════════════════════════════════
+// This module is a static black box. It owns the entire binary pipeline:
+//   1. Preset JSON (HTModelPreset shape) → compact string → UTF-8 bytes.
+//   2. 20-byte little-endian header (magic, firmware, seed, Adler-32, size).
+//   3. Selective XOR cipher (LCG, skip 32 bytes, cap 512 bytes).
+//   4. Byte array → JSON integer-array string → Base64 → {version,data}.
 //
-// Reconstructs the binary preset format used by the official Sonicake editor:
-//   1. A preset JSON (HTModelPreset shape) is serialized compactly to bytes.
-//   2. A 20-byte little-endian header is prepended (magic, version, seed,
-//      Adler-32 checksum, payload size).
-//   3. The payload is XOR-encrypted with a 32-bit LCG, skipping the first 32
-//      bytes and capping encryption at 512 bytes (ENCRYPTED_SIZE).
-//   4. The resulting byte array is rendered as a compact JSON integer array
-//      string, Base64-encoded, and wrapped in `{ "version": 1, "data": ... }`.
+// The engine has ZERO coupling to the AI layer. It accepts a plain
+// GeneratedPreset (a UI-level type from types.ts) and emits the file body.
+// It must not import, reference, or depend on gemini.ts or any AI type.
+//
+// DO NOT modify the hardware magic numbers, LCG constants, Adler-32 modulus,
+// skip/limit offsets, or header layout. They are factory specifications
+// reverse-engineered from the official Sonicake editor and the Matribox II
+// firmware. UI changes, prompt changes, or refactors must touch this file
+// ONLY if a verified format bug is found — never to “simplify” it.
+// ════════════════════════════════════════════════════════════════════════════
 
 import type { GeneratedPreset } from './types';
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
-export interface ChainEntry {
-  modulo: string;
-  nomeEfeito: string;
-  knobs: number[];
-  /**
-   * The real numeric FXID resolved from alg_data.json during validation.
-   * Set by validateAiResponse (the single place an effect is confirmed to
-   * exist in the catalog) and consumed directly here to fill the preset JSON.
-   */
-  fxid?: number;
-}
-
-export interface AiPresetResponse {
-  nomePatch: string;
-  comentario: string;
-  cadeia: ChainEntry[];
-}
-
 // ── Cryptography ─────────────────────────────────────────────────────────────
 
+// ── Hardware constants (factory-locked) ─────────────────────────────────────
 const ENCRYPTED_SIZE = 512;
 const HEADER_SIZE = 20;
 const SKIP_BYTES = 32;
