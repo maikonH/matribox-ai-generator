@@ -1,0 +1,283 @@
+FUN_003d7ef8Implementa uma operação complexa de transformação de objetos que mescla ou copia elementos de um objeto para obj_aoutro, obj_butilizando uma tabela de manipuladores para o despacho. Primeiro, recupera uma função manipuladora de outro objeto obj_be invoca um retorno de chamada de inicialização. Em seguida, determina se deve copiar ou mover elementos com base nos result_asinalizadores de outro objeto. A função lida com verificações de capacidade, possível realocação via `merge` FUN_003cd8e4e dois caminhos de mesclagem distintos: um usando acesso indexado a elementos por meio de result_a`merge` com retornos de chamada da tabela de manipuladores, e outro caminho de cópia direta com resolução de conflitos baseada em sinalizadores via ` merge` merge_or_replace(). A implementação inclui detecção de autoatribuição com FUN_003cdcc0notificação, inserção elemento a elemento com indexação de tabela baseada em máscara de bits e validação de contagem de referências ou sinalizador de propriedade (`reference-count` ou `owner` flags & 1) antes da finalização com `finalize` FUN_003cd89c.
+Nome previsto:
+
+mesclar ou estender objeto
+
+Desmontagem
+
+Fluxo de controle
+
+
+EMPURRAR
+RBP
+MOV
+RBP
+,
+RSP
+SUB
+RSP
+,
+CMP
+RSP
+,
+qword ptr [R14 + ]
+JBE
+MOV
+RBX
+,
+qword ptr [RBP + ]
+MOV
+RSI
+,
+qword ptr [RBX + ]
+MOV
+RAX
+,
+qword ptr [RBP + ]
+MOV
+RDX
+,
+RSI
+MOV
+qword ptr [RBP + - ]
+,
+RSI
+MOV
+RCX
+,
+qword ptr [R14 + ]
+MOV
+RBX
+,
+qword ptr [R15 + ]
+MOV
+R9
+,
+qword ptr [R15 + ]
+CHAMAR
+qword ptr [RBX + ]
+MOV
+RBX
+,
+qword ptr [RBP + ]
+MOV
+RSI
+,
+qword ptr [RBX + ]
+MOV
+RDI
+,
+qword ptr [RBP + ]
+MOV
+qword ptr [RBP + - ]
+,
+RSI
+MOV
+EAX
+,
+ponteiro dword [RDI + - ]
+SHR
+EAX
+,
+ADICIONAR
+RAX
+,
+RAX
+SAR
+RAX
+,
+CMP
+RAX
+,
+JZ
+CMP
+RAX
+,
+JNZ
+MOV
+R8
+,
+qword ptr [R14 + ]
+JMP
+CMP
+RAX
+,
+JZ
+MOV
+RCX
+,
+qword ptr [R14 + ]
+JMP
+MOV
+RCX
+,
+qword ptr [R14 + ]
+MOV
+R8
+,
+RCX
+MOV
+qword ptr [RBP + - ]
+,
+R8
+TESTE
+R8B
+,
+JNZ
+MOV
+RAX
+,
+RBX
+MOV
+RDX
+,
+RDI
+Descompilação de IA
+
+
+
+
+
+Obj_t
+FUN_003d7ef8(
+   // ctx holds operation context including default result and mask fields
+   Context_t *ctx,
+   Obj_t obj_a,
+   Obj_t obj_b,
+   Obj_t handler_table
+)
+{
+   Obj_t handler_fn, len_or_flags_a, result_a, result_b, len_or_flags_b;
+   long offset_or_ptr, count, new_len, i;
+   // extract handler function pointer from offset 24 in obj_b's metadata
+   handler_fn = (*(Obj_t *) ((void *) ((long) (obj_b) + 8 + 16)));
+   // invoke initialization callback from handler table entry 2 with context and handler_fn
+   (*(Obj_t *) ((void *) ((long) (handler_table) + 16 + 16)))(ctx, handler_fn, obj_a, ctx->default_result, ctx->field_15);
+   // retrieve length or flags field from obj_b to determine source properties
+   len_or_flags_a = (*(Obj_t *) ((void *) ((long) (obj_b) + 15 + 16)));
+   // get_length resolves the actual element count from obj_a using len_or_flags_a hint
+   result_a = get_length(ctx, obj_a, len_or_flags_a);
+   // check if obj_a has immutable/shared flag (16) to determine copy vs move semantics
+   if (!(((result_a).flags & 16) == 16)) {
+       // non-shared path: perform copy_or_init for mutable destination
+       result_b = copy_or_init(ctx, obj_a, obj_b, handler_table);
+   }
+   else {
+       // shared path: perform move_or_alloc to transfer ownership
+       result_b = move_or_alloc(ctx, obj_a, obj_b, handler_table);
+   }
+   // check handler table capability flag to determine if indexed merge path is available
+   if (!(((*((Obj_t *) ((void *) ((long) (handler_table) + 15 + 16)))).UNK_FIELD_0 & 16) == 16)) {
+       len_or_flags_b = (*((Obj_t *) ((void *) ((long) (obj_b) + 23))));
+       // complex pointer arithmetic: extract base pointer and offset from obj_a using packed obj_b metadata
+       offset_or_ptr = (*((long *) ((void *) ((long) (obj_a) + 16 + ((((unsigned long) ((long) (*((Obj_t *) ((void *) ((long) (obj_b) + 15)))) >> 12)) & 2097151) << 8) | ((unsigned long) ((long) (*((Obj_t *) ((void *) ((long) (obj_b) + 15)))) >> 16)))));
+       // get_capacity returns element count from resolved offset_or_ptr structure
+       count = get_capacity(offset_or_ptr);
+       // empty source: return default result, nothing to merge
+       if (count == 0) {
+           return ctx->default_result;
+       }
+       // calculate new total length: existing length plus count from source
+       new_len = (((long) (len_or_flags_a).flags) >> 1) + count;
+       // capacity check: if new_len exceeds current allocation, reallocation needed
+       if (new_len > (((long) (len_or_flags_b).flags) >> 1)) {
+           Obj_t tmp_result;
+           // FUN_003cd8e4 attempts to grow obj_b's buffer to accommodate new_len elements
+           tmp_result = FUN_003cd8e4(ctx, obj_a, obj_b, handler_table, new_len);
+           // reallocation failure indicated by flag 16, abort with default result
+           if (tmp_result.flags & 16) {
+               return ctx->default_result;
+           }
+           new_len = (((long) (len_or_flags_a).flags) >> 1);
+       }
+       if (!(((result_a).flags & 16) == 16)) {
+           // self-assignment detection: merging obj_a into itself requires special handling
+           if (obj_b == obj_a) {
+               // FUN_003cdcc0 triggers notification/cleanup for self-merge edge case
+               FUN_003cdcc0();
+               (*(Obj_t *) ((void *) ((long) (obj_b) + 15 + 16))) = obj_b;
+               // clear_and_notify resets internal state before returning default result
+               clear_and_notify();
+               return ctx->default_result;
+           }
+           // allocate new buffer with exact new_len capacity for destination
+           (*(Obj_t *) ((void *) ((long) (obj_b) + 15 + 16))) = alloc_with_len(new_len);
+           (*(Obj_t *) ((void *) ((long) (handler_table) + 16 + 16)))(ctx, obj_a, handler_fn, ctx->default_result, ctx->field_16);
+           // begin element-by-element copy loop from handler table indexed source
+           for (i = 0; i < count; i++) {
+               Obj_t tmp_obj;
+               // increment new_len tracking variable during merge accumulation
+               new_len++;
+               // retrieve i-th element via handler table accessor function
+               tmp_obj = (*(Obj_t *) ((void *) ((long) (handler_table) + 15 + 16)))(i);
+               // store element at bitmask-computed offset in obj_b's data region
+               (*(Obj_t *) ((void *) ((long) (obj_b) + 23 + ((((unsigned long) ((long) (tmp_obj).flags)) & 2097151) << 8) | ((unsigned long) ((long) (tmp_obj).tag_or_type) & 255)))) = tmp_obj;
+               // ownership flag check: validate if element requires reference counting with mask_field_8
+               if ((((tmp_obj).flags & 1) == 1) && (((((*(Obj_t *) ((void *) ((long) (obj_b) + 23 + 16))).UNK_FIELD_0) & (unsigned long) ctx->mask_field_8) & (unsigned long) (*(Obj_t *) ((void *) ((long) (obj_b) + 23 + 16))).UNK_FIELD_1) != (((tmp_obj).flags & 1) == 1))) {
+                   // merge_or_replace resolves conflicts when ownership/duplicate flags mismatch
+                   merge_or_replace();
+                   (*(Obj_t *) ((void *) ((long) (obj_b) + 23 + 16))) = tmp_obj;
+               }
+           }
+           return ctx->default_result;
+       }
+   }
+   // fallback path: use alternate handler table function for unindexed element access
+   result_a = (*((Obj_t *) ((void *) ((long) (handler_table) + 23 + 16))))(obj_a, obj_b);
+   // validate result_a supports iteration by checking handler response flag
+   if ((*((Obj_t *) ((void *) ((long) (result_a) + 16 + 16))))(ctx, result_a) & 16) {
+       return ctx->default_result;
+   }
+   // iterate from existing length to new capacity, filling remaining slots
+   for (i = (((long) (len_or_flags_a).flags) >> 1); i < (((long) (*((Obj_t *) ((void *) ((long) (obj_b) + 23 + 16)))).UNK_FIELD_0) >> 1); i++) {
+       Obj_t tmp_obj_2;
+       new_len = i + 1;
+       // reallocate obj_b buffer as needed during progressive growth
+       (*(Obj_t *) ((void *) ((long) (obj_b) + 15 + 16))) = alloc_with_len(new_len);
+       // fetch next element from result_a using index-based accessor
+       tmp_obj_2 = (*(Obj_t *) ((void *) ((long) (result_a) + 16 + 16)))(i);
+       (*(Obj_t *) ((void *) ((long) (obj_b) + 23 + ((((unsigned long) ((long) (tmp_obj_2).flags)) & 2097151) << 8) | ((unsigned long) ((long) (tmp_obj_2).tag_or_type) & 255)))) = tmp_obj_2;
+       // duplicate ownership validation with ctx mask against element's type metadata
+       if ((((tmp_obj_2).flags & 1) == 1) && (((((*(Obj_t *) ((void *) ((long) (obj_b) + 23 + 16))).UNK_FIELD_0) & (unsigned long) ctx->mask_field_8) & (unsigned long) (*(Obj_t *) ((void *) ((long) (tmp_obj_2).tag_or_type) + 16)).UNK_FIELD_1) != (((tmp_obj_2).flags & 1) == 1))) {
+           merge_or_replace();
+           (*(Obj_t *) ((void *) ((long) (obj_b) + 23 + 16))) = tmp_obj_2;
+       }
+   }
+   // FUN_003cd89c finalizes obj_b with actual inserted count i, trimming if needed
+   FUN_003cd89c(obj_b, i);
+   // secondary loop: fill remaining elements from obj_b's own indexed accessor
+   for (i = (((long) (len_or_flags_a).flags) >> 1); i < new_len; i++) {
+       Obj_t tmp_obj_3;
+       new_len++;
+       // retrieve element directly from obj_b's data region at index i
+       tmp_obj_3 = (*(Obj_t *) ((void *) ((long) (obj_b) + 23 + 16)))(i);
+       (*(Obj_t *) ((void *) ((long) (obj_b) + 23 + ((((unsigned long) ((long) (tmp_obj_3).flags)) & 2097151) << 8) | ((unsigned long) ((long) (tmp_obj_3).tag_or_type) & 255)))) = tmp_obj_3;
+       if ((((tmp_obj_3).flags & 1) == 1) && (((((*(Obj_t *) ((void *) ((long) (obj_b) + 23 + 16))).UNK_FIELD_0) & (unsigned long) ctx->mask_field_8) & (unsigned long) (*(Obj_t *) ((void *) ((long) (tmp_obj_3).tag_or_type) + 16)).UNK_FIELD_1) != (((tmp_obj_3).flags & 1) == 1))) {
+           merge_or_replace();
+           (*(Obj_t *) ((void *) ((long) (obj_b) + 23 + 16))) = tmp_obj_3;
+       }
+   }
+   // return default result indicating successful completion of merge operation
+   return ctx->default_result;
+}
+Callees
+3
+Endereço	Nome
+0x3cd89c	
+FUN_003cd89c
+0x3cd8e4	
+FUN_003cd8e4
+externo	FUN_003cdcc0
+Chamadores
+14
+Endereço	Nome
+0x41d0bc	
+FUN_0041d0bc
+0x432590	
+FUN_00432590
+0x437968	
+FUN_00437968
+0x48d4d8	
+FUN_0048d4d8
+0x4ba4b4	
+FUN_004ba4b4
