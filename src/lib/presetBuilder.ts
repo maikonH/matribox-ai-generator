@@ -235,15 +235,22 @@ export function buildPresetFile(preset: GeneratedPreset): string {
   const compactJson = JSON.stringify(presetObj).replace(/\s+/g, '');
   const jsonBytes = new TextEncoder().encode(compactJson);
 
-  // The checksum is computed over a TEMPORARY 4-byte-aligned copy (padding lives
-  // only inside calculateChecksum). The exported payload stays the original,
-  // unpadded UTF-8 JSON so the pedal's JSON parser never sees trailing 0x00.
+  // Hardware cap: the final binary array (Header + encrypted Payload) must
+  // not exceed 512 bytes. Truncate the payload BEFORE checksum and encryption
+  // so the Data Size field, the checksum, and the cipher stream all describe
+  // the same adjusted byte length — no partial unencrypted tail can leak.
+  const MAX_TOTAL = 512;
+  const MAX_PAYLOAD = MAX_TOTAL - HEADER_SIZE;
+  const payloadBytes = jsonBytes.length > MAX_PAYLOAD
+    ? jsonBytes.subarray(0, MAX_PAYLOAD)
+    : jsonBytes;
+
   const seed = Date.now() & 0xffffffff;
-  const checksum = calculateChecksum(jsonBytes);
-  const header = buildHeader(seed, checksum, jsonBytes.length);
+  const checksum = calculateChecksum(payloadBytes);
+  const header = buildHeader(seed, checksum, payloadBytes.length);
 
   const cipher = new LfsrCipher(seed);
-  const encryptedPayload = cipher.transform(jsonBytes);
+  const encryptedPayload = cipher.transform(payloadBytes);
 
   const finalBytes = new Uint8Array(header.length + encryptedPayload.length);
   finalBytes.set(header, 0);
