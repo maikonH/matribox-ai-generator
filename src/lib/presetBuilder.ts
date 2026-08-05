@@ -152,21 +152,23 @@ class LfsrCipher {
     this.state = seed >>> 0;
   }
 
-  nextByte(): number {
-    // Pure 32-bit LFSR: advance via left shift, XOR tracking polynomial on MSB overflow.
-    if ((this.state & MSB_MASK) !== 0) {
-      this.state = ((this.state << 1) ^ LFSR_POLY) >>> 0;
-    } else {
-      this.state = (this.state << 1) >>> 0;
-    }
-    return this.state & 0xff;
-  }
-
   transform(data: Uint8Array): Uint8Array {
     const result = new Uint8Array(data.length);
     const limit = Math.min(data.length, ENCRYPTED_SIZE);
     for (let i = 0; i < data.length; i++) {
-      result[i] = i < limit ? (data[i] ^ this.nextByte()) : data[i];
+      if (i < limit) {
+        // 1. Mask with the CURRENT state before the register shifts.
+        const maskKey = this.state & 0xff;
+        result[i] = data[i] ^ maskKey;
+        // 2. Advance the LFSR AFTER the XOR, for the next index.
+        if ((this.state & MSB_MASK) !== 0) {
+          this.state = ((this.state << 1) ^ LFSR_POLY) >>> 0;
+        } else {
+          this.state = (this.state << 1) >>> 0;
+        }
+      } else {
+        result[i] = data[i];
+      }
     }
     return result;
   }
@@ -236,12 +238,24 @@ export function buildPresetFile(preset: GeneratedPreset): string {
   const compactJson = JSON.stringify(presetObj);
   const jsonBytes = new TextEncoder().encode(compactJson);
 
+  // Align the UTF-8 payload to a strict 4-byte boundary before checksum and
+  // encryption, so the LFSR receives clean uint32 blocks and the Data Size
+  // field reflects the finalized aligned array.
+  const remainder = jsonBytes.length % 4;
+  const alignedBytes = remainder === 0
+    ? jsonBytes
+    : (() => {
+        const padded = new Uint8Array(jsonBytes.length + (4 - remainder));
+        padded.set(jsonBytes);
+        return padded;
+      })();
+
   const seed = Date.now() & 0xffffffff;
-  const checksum = calculateChecksum(jsonBytes);
-  const header = buildHeader(seed, checksum, jsonBytes.length);
+  const checksum = calculateChecksum(alignedBytes);
+  const header = buildHeader(seed, checksum, alignedBytes.length);
 
   const cipher = new LfsrCipher(seed);
-  const encryptedPayload = cipher.transform(jsonBytes);
+  const encryptedPayload = cipher.transform(alignedBytes);
 
   const finalBytes = new Uint8Array(header.length + encryptedPayload.length);
   finalBytes.set(header, 0);
