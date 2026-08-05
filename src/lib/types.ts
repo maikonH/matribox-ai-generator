@@ -62,6 +62,14 @@ export interface ValidationResult {
   count: number;
 }
 
+// Report produced by the .prst engine's sanitization stage. Surfaces what the
+// anti-crash layer disabled or clamped so the UI can warn the user, without
+// leaking any engine internals.
+export interface SanitizationReport {
+  disabledModules: string[];
+  clampedParams: { module: string; param: string; from: number; to: number }[];
+}
+
 // ── AI ↔ Engine contract ─────────────────────────────────────────────────────
 // These types form the ONLY bridge between the AI generator (gemini.ts) and
 // the .prst engine (presetBuilder.ts). They live here, on neutral ground, so

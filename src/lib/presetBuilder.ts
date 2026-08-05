@@ -1,80 +1,178 @@
 // ════════════════════════════════════════════════════════════════════════════
 // MATRIBOX II PRO — .prst ENGINE  (FROZEN)
 // ════════════════════════════════════════════════════════════════════════════
-// This module is a static black box. It owns the entire binary pipeline:
-//   1. Preset JSON (HTModelPreset shape) → compact string → UTF-8 bytes.
-//   2. 20-byte little-endian header (magic, firmware, seed, Adler-32, size).
-//   3. Selective XOR cipher (LCG, skip 32 bytes, cap 512 bytes).
-//   4. Byte array → JSON integer-array string → Base64 → {version,data}.
+// This module is a static black box. It owns the entire 6-stage binary pipeline:
+//   1. Input sanitization & DSP preservation (anti-crash layer).
+//   2. Linear custom checksum (LFSR verification) over the raw JSON bytes.
+//   3. 20-byte little-endian header construction.
+//   4. Dynamic LFSR payload encryption (byte 0, cap 512).
+//   5. Header + encrypted payload → Base64 → {version,data} wrapper.
 //
 // The engine has ZERO coupling to the AI layer. It accepts a plain
 // GeneratedPreset (a UI-level type from types.ts) and emits the file body.
 // It must not import, reference, or depend on gemini.ts or any AI type.
 //
-// DO NOT modify the hardware magic numbers, LCG constants, Adler-32 modulus,
-// skip/limit offsets, or header layout. They are factory specifications
-// reverse-engineered from the official Sonicake editor and the Matribox II
-// firmware. UI changes, prompt changes, or refactors must touch this file
-// ONLY if a verified format bug is found — never to “simplify” it.
+// DO NOT modify the hardware magic numbers, LFSR constants, seed values,
+// header layout, or the 512-byte encryption cap. They are factory
+// specifications reverse-engineered from the official Sonicake editor and
+// the Matribox II Pro firmware (see src/docs/). UI changes, prompt changes,
+// or refactors must touch this file ONLY if a verified format bug is found
+// — never to “simplify” it.
 // ════════════════════════════════════════════════════════════════════════════
 
-import type { GeneratedPreset } from './types';
-
-// ── Cryptography ─────────────────────────────────────────────────────────────
+import type { GeneratedPreset, PresetModule } from './types';
+import { HARDWARE_SLOTS } from './hardwareSlots';
 
 // ── Hardware constants (factory-locked) ─────────────────────────────────────
-const ENCRYPTED_SIZE = 512;
-const HEADER_SIZE = 20;
-const SKIP_BYTES = 32;
 
-export class MatriboxCrypto {
+const HEADER_SIZE = 20;
+const ENCRYPTED_SIZE = 0x200; // 512 bytes — payload bytes past index 511 pass through.
+
+const MAGIC_HEADER = [0x03, 0x02, 0x00, 0x00];
+const FIRMWARE_VERSION = [0x10, 0x0b, 0x00, 0x80];
+
+// Checksum constants (from src/docs/codigo_checksum.txt)
+const CHECKSUM_SEED = 0x150898;
+const MSB_MASK = 0x80000000;
+const MURMUR_C1 = 0x1b873593;
+
+// Encryption LFSR tracking polynomial (CRC-32 standard, per directive A)
+const LFSR_POLY = 0x04c11db7;
+
+// Knob value bounds (per directive C: decimal percentage range)
+const KNOB_MIN = 0.0;
+const KNOB_MAX = 100.0;
+
+// ── Stage 1: Input Sanitization & DSP Preservation ──────────────────────────
+
+const ALLOWED_SLOT_CODES = new Set(HARDWARE_SLOTS.map((s) => s.code));
+
+export interface SanitizationReport {
+  disabledModules: string[];
+  clampedParams: { module: string; param: string; from: number; to: number }[];
+}
+
+function clampKnob(value: number): number {
+  if (!Number.isFinite(value)) return KNOB_MIN;
+  return Math.max(KNOB_MIN, Math.min(KNOB_MAX, value));
+}
+
+function sanitizeModule(mod: PresetModule, report: SanitizationReport): PresetModule {
+  const slot = HARDWARE_SLOTS.find((s) => s.code === mod.fxId || s.aliases.includes(mod.fxId.toUpperCase()));
+  const fxId = slot ? slot.code : mod.fxId;
+  const allowed = ALLOWED_SLOT_CODES.has(fxId);
+
+  if (!allowed) {
+    report.disabledModules.push(fxId);
+    return { ...mod, fxId, enabled: false };
+  }
+
+  const params = mod.params.map((p) => {
+    const clamped = clampKnob(p.value);
+    if (clamped !== p.value) {
+      report.clampedParams.push({ module: fxId, param: p.name, from: p.value, to: clamped });
+    }
+    return { ...p, value: clamped };
+  });
+
+  return { ...mod, fxId, params };
+}
+
+function sanitizePreset(preset: GeneratedPreset): { preset: GeneratedPreset; report: SanitizationReport } {
+  const report: SanitizationReport = { disabledModules: [], clampedParams: [] };
+  const modules = preset.modules.map((m) => sanitizeModule(m, report));
+  return { preset: { ...preset, modules }, report };
+}
+
+// ── Stage 2: Linear Custom Checksum (LFSR Verification) ──────────────────────
+
+function calculateChecksum(data: Uint8Array): number {
+  let checksum = CHECKSUM_SEED;
+
+  // Pad to 4-byte alignment
+  const remainder = data.length % 4;
+  const padded = remainder === 0 ? data : new Uint8Array(data.length + (4 - remainder));
+  if (remainder !== 0) padded.set(data);
+
+  const view = new DataView(padded.buffer, padded.byteOffset, padded.byteLength);
+
+  for (let i = 0; i < padded.length; i += 4) {
+    const chunk = view.getUint32(i, true);
+
+    // LFSR bit-sign overflow check
+    if ((checksum & MSB_MASK) !== 0) {
+      checksum = ((checksum >> 1) ^ MSB_MASK) >>> 0;
+    } else {
+      checksum = (checksum >> 1) >>> 0;
+    }
+
+    // Modular addition
+    checksum = (checksum + chunk) >>> 0;
+
+    // MurmurHash3-style mixing feedback
+    checksum = ((checksum * MURMUR_C1) + CHECKSUM_SEED) >>> 0;
+
+    // Bitwise rotation left by 13
+    checksum = ((checksum << 13) | (checksum >>> 19)) >>> 0;
+  }
+
+  // Final sign-bit inversion
+  return (checksum ^ MSB_MASK) >>> 0;
+}
+
+// ── Stage 3: Header Construction (Strict 20-Byte Layout) ─────────────────────
+
+function buildHeader(seed: number, checksum: number, payloadSize: number): Uint8Array {
+  const header = new Uint8Array(HEADER_SIZE);
+  const view = new DataView(header.buffer);
+
+  header[0] = MAGIC_HEADER[0];
+  header[1] = MAGIC_HEADER[1];
+  header[2] = MAGIC_HEADER[2];
+  header[3] = MAGIC_HEADER[3];
+
+  header[4] = FIRMWARE_VERSION[0];
+  header[5] = FIRMWARE_VERSION[1];
+  header[6] = FIRMWARE_VERSION[2];
+  header[7] = FIRMWARE_VERSION[3];
+
+  view.setUint32(8, seed >>> 0, true);
+  view.setUint32(12, checksum >>> 0, true);
+  view.setUint32(16, payloadSize >>> 0, true);
+
+  return header;
+}
+
+// ── Stage 4: Dynamic LCG Payload Encryption ──────────────────────────────────
+
+class LfsrCipher {
   private state: number;
-  private readonly MULTIPLIER = 1103515245; // 0x41C64E6D
-  private readonly INCREMENT = 12345;       // 0x3039
-  private readonly MODULUS = 0x80000000;     // 2^31
 
   constructor(seed: number) {
     this.state = seed >>> 0;
   }
 
-  private nextKey(): number {
-    const nextState =
-      (BigInt(this.MULTIPLIER) * BigInt(this.state) + BigInt(this.INCREMENT)) %
-      BigInt(this.MODULUS);
-    this.state = Number(nextState);
-    return (this.state >> 16) & 0xff;
+  nextByte(): number {
+    // Pure 32-bit LFSR: advance via left shift, XOR tracking polynomial on MSB overflow.
+    if ((this.state & MSB_MASK) !== 0) {
+      this.state = ((this.state << 1) ^ LFSR_POLY) >>> 0;
+    } else {
+      this.state = (this.state << 1) >>> 0;
+    }
+    return this.state & 0xff;
   }
 
-  public transform(data: Uint8Array): Uint8Array {
+  transform(data: Uint8Array): Uint8Array {
     const result = new Uint8Array(data.length);
-    const encryptLimit = Math.min(data.length, SKIP_BYTES + ENCRYPTED_SIZE);
-
+    const limit = Math.min(data.length, ENCRYPTED_SIZE);
     for (let i = 0; i < data.length; i++) {
-      if (i >= SKIP_BYTES && i < encryptLimit) {
-        result[i] = data[i] ^ this.nextKey();
-      } else {
-        result[i] = data[i];
-      }
+      result[i] = i < limit ? (data[i] ^ this.nextByte()) : data[i];
     }
     return result;
-  }
-
-  public static calculateChecksum(data: Uint8Array): number {
-    let sum1 = 1;
-    let sum2 = 0;
-    const MOD_ADLER = 65521;
-
-    for (let i = 0; i < data.length; i++) {
-      sum1 = (sum1 + data[i]) % MOD_ADLER;
-      sum2 = (sum2 + sum1) % MOD_ADLER;
-    }
-    return ((sum2 << 16) | sum1) >>> 0;
   }
 }
 
 // ── Preset JSON serialization ────────────────────────────────────────────────
-
-const clamp = (val: number): number => Math.max(0, Math.min(127, Math.round(val)));
 
 interface QKnob {
   knobID: number;
@@ -98,12 +196,14 @@ function buildPresetJson(preset: GeneratedPreset): PresetJson {
     const fxid = Number(mod.fxId);
     const qKnob: QKnob[] = mod.params.map((p, i) => ({
       knobID: i,
-      value: clamp(p.value),
+      value: p.value,
     }));
-    return { fxid, active: true, qKnob };
+    return { fxid, active: mod.enabled !== false, qKnob };
   });
 
-  const chain = preset.modules.map((mod) => Number(mod.fxId));
+  const chain = preset.modules
+    .filter((m) => m.enabled !== false)
+    .map((mod) => Number(mod.fxId));
 
   return {
     presetName: preset.title,
@@ -112,38 +212,8 @@ function buildPresetJson(preset: GeneratedPreset): PresetJson {
   };
 }
 
-// ── Binary header ────────────────────────────────────────────────────────────
+// ── Stage 5: Base64 Wrap & File Output ───────────────────────────────────────
 
-const MAGIC_HEADER = [3, 2, 0, 0];
-const FIRMWARE_VERSION = [16, 11, 0, 128];
-
-function buildHeader(seed: number, checksum: number, payloadSize: number): Uint8Array {
-  const header = new Uint8Array(HEADER_SIZE);
-  const view = new DataView(header.buffer);
-
-  header[0] = MAGIC_HEADER[0];
-  header[1] = MAGIC_HEADER[1];
-  header[2] = MAGIC_HEADER[2];
-  header[3] = MAGIC_HEADER[3];
-
-  header[4] = FIRMWARE_VERSION[0];
-  header[5] = FIRMWARE_VERSION[1];
-  header[6] = FIRMWARE_VERSION[2];
-  header[7] = FIRMWARE_VERSION[3];
-
-  view.setUint32(8, seed >>> 0, true);
-  view.setUint32(12, checksum >>> 0, true);
-  view.setUint32(16, payloadSize >>> 0, true);
-
-  return header;
-}
-
-// ── Encapsulation ────────────────────────────────────────────────────────────
-
-/**
- * Convert a Uint8Array to a Base64 string via direct binary encoding.
- * Chunks the spread to avoid call-stack overflow on large payloads.
- */
 function bytesToBase64(bytes: Uint8Array): string {
   const CHUNK = 0x8000;
   let binary = '';
@@ -156,21 +226,22 @@ function bytesToBase64(bytes: Uint8Array): string {
 /**
  * Build a complete .prst file from a generated preset.
  *
- * Pipeline: preset JSON → compact string → UTF-8 bytes → Adler-32 checksum
- * → 20-byte header → selective LCG XOR cipher → header+payload → Base64 →
- * factory envelope `{ "version": 1, "data": base64Data }`.
+ * Pipeline: sanitize → preset JSON → compact string → UTF-8 bytes →
+ * LFSR checksum → 20-byte header → LFSR XOR cipher (byte 0, cap 512) →
+ * header+payload → Base64 → factory envelope `{ "version": 1, "data": base64 }`.
  */
 export function buildPresetFile(preset: GeneratedPreset): string {
-  const presetObj = buildPresetJson(preset);
+  const { preset: sanitized } = sanitizePreset(preset);
+  const presetObj = buildPresetJson(sanitized);
   const compactJson = JSON.stringify(presetObj);
   const jsonBytes = new TextEncoder().encode(compactJson);
 
   const seed = Date.now() & 0xffffffff;
-  const checksum = MatriboxCrypto.calculateChecksum(jsonBytes);
+  const checksum = calculateChecksum(jsonBytes);
   const header = buildHeader(seed, checksum, jsonBytes.length);
 
-  const crypto = new MatriboxCrypto(seed);
-  const encryptedPayload = crypto.transform(jsonBytes);
+  const cipher = new LfsrCipher(seed);
+  const encryptedPayload = cipher.transform(jsonBytes);
 
   const finalBytes = new Uint8Array(header.length + encryptedPayload.length);
   finalBytes.set(header, 0);
