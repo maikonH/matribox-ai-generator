@@ -170,41 +170,33 @@ class LfsrCipher {
 
 // ── Preset JSON serialization ────────────────────────────────────────────────
 
-interface QKnob {
-  knobID: number;
-  value: number;
-}
-
 interface PresetModuleJson {
-  fxid: number;
-  active: boolean;
-  qKnob: QKnob[];
+  i: number;
+  a: boolean;
+  k: number[];
 }
 
 interface PresetJson {
-  presetName: string;
-  Modules: PresetModuleJson[];
-  chain: number[];
+  n: string;
+  m: PresetModuleJson[];
+  c: number[];
 }
 
 function buildPresetJson(preset: GeneratedPreset): PresetJson {
-  const modules: PresetModuleJson[] = preset.modules.map((mod) => {
-    const fxid = Number(mod.fxId);
-    const qKnob: QKnob[] = mod.params.map((p, i) => ({
-      knobID: i,
-      value: p.value,
-    }));
-    return { fxid, active: mod.enabled !== false, qKnob };
-  });
+  const modules: PresetModuleJson[] = preset.modules.map((mod) => ({
+    i: Number(mod.fxId),
+    a: mod.enabled !== false,
+    k: mod.params.map((p) => p.value),
+  }));
 
   const chain = preset.modules
     .filter((m) => m.enabled !== false)
     .map((mod) => Number(mod.fxId));
 
   return {
-    presetName: preset.title,
-    Modules: modules,
-    chain,
+    n: preset.title,
+    m: modules,
+    c: chain,
   };
 }
 
@@ -235,22 +227,12 @@ export function buildPresetFile(preset: GeneratedPreset): string {
   const compactJson = JSON.stringify(presetObj).replace(/\s+/g, '');
   const jsonBytes = new TextEncoder().encode(compactJson);
 
-  // Hardware cap: the final binary array (Header + encrypted Payload) must
-  // not exceed 512 bytes. Truncate the payload BEFORE checksum and encryption
-  // so the Data Size field, the checksum, and the cipher stream all describe
-  // the same adjusted byte length — no partial unencrypted tail can leak.
-  const MAX_TOTAL = 512;
-  const MAX_PAYLOAD = MAX_TOTAL - HEADER_SIZE;
-  const payloadBytes = jsonBytes.length > MAX_PAYLOAD
-    ? jsonBytes.subarray(0, MAX_PAYLOAD)
-    : jsonBytes;
-
   const seed = Date.now() & 0xffffffff;
-  const checksum = calculateChecksum(payloadBytes);
-  const header = buildHeader(seed, checksum, payloadBytes.length);
+  const checksum = calculateChecksum(jsonBytes);
+  const header = buildHeader(seed, checksum, jsonBytes.length);
 
   const cipher = new LfsrCipher(seed);
-  const encryptedPayload = cipher.transform(payloadBytes);
+  const encryptedPayload = cipher.transform(jsonBytes);
 
   const finalBytes = new Uint8Array(header.length + encryptedPayload.length);
   finalBytes.set(header, 0);
