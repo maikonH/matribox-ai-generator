@@ -5,7 +5,7 @@
 //   1. Input sanitization & DSP preservation (anti-crash layer).
 //   2. Linear custom checksum (LFSR verification) over the raw JSON bytes.
 //   3. 20-byte little-endian header construction.
-//   4. Dynamic LFSR payload encryption (byte 0, cap 512).
+//   4. Dynamic LFSR payload encryption (full payload, no cap).
 //   5. Header + encrypted payload → Base64 → {version,data} wrapper.
 //
 // The engine has ZERO coupling to the AI layer. It accepts a plain
@@ -26,7 +26,6 @@ import { HARDWARE_SLOTS } from './hardwareSlots';
 // ── Hardware constants (factory-locked) ─────────────────────────────────────
 
 const HEADER_SIZE = 20;
-const ENCRYPTED_SIZE = 0x200; // 512 bytes — payload bytes past index 511 pass through.
 
 const MAGIC_HEADER = [0x03, 0x02, 0x00, 0x00];
 const FIRMWARE_VERSION = [0x10, 0x0b, 0x00, 0x80];
@@ -154,20 +153,15 @@ class LfsrCipher {
 
   transform(data: Uint8Array): Uint8Array {
     const result = new Uint8Array(data.length);
-    const limit = Math.min(data.length, ENCRYPTED_SIZE);
     for (let i = 0; i < data.length; i++) {
-      if (i < limit) {
-        // 1. Mask with the CURRENT state before the register shifts.
-        const maskKey = this.state & 0xff;
-        result[i] = data[i] ^ maskKey;
-        // 2. Advance the LFSR AFTER the XOR, for the next index.
-        if ((this.state & MSB_MASK) !== 0) {
-          this.state = ((this.state << 1) ^ LFSR_POLY) >>> 0;
-        } else {
-          this.state = (this.state << 1) >>> 0;
-        }
+      // 1. Mask with the CURRENT state before the register shifts.
+      const maskKey = this.state & 0xff;
+      result[i] = data[i] ^ maskKey;
+      // 2. Advance the LFSR AFTER the XOR, for the next index.
+      if ((this.state & MSB_MASK) !== 0) {
+        this.state = ((this.state << 1) ^ LFSR_POLY) >>> 0;
       } else {
-        result[i] = data[i];
+        this.state = (this.state << 1) >>> 0;
       }
     }
     return result;
@@ -229,13 +223,16 @@ function bytesToBase64(bytes: Uint8Array): string {
  * Build a complete .prst file from a generated preset.
  *
  * Pipeline: sanitize → preset JSON → compact string → UTF-8 bytes →
- * LFSR checksum → 20-byte header → LFSR XOR cipher (byte 0, cap 512) →
+ * LFSR checksum → 20-byte header → LFSR XOR cipher (full payload) →
  * header+payload → Base64 → factory envelope `{ "version": 1, "data": base64 }`.
  */
 export function buildPresetFile(preset: GeneratedPreset): string {
   const { preset: sanitized } = sanitizePreset(preset);
   const presetObj = buildPresetJson(sanitized);
-  const compactJson = JSON.stringify(presetObj);
+  // Strict minification: JSON.stringify with no replacer/spacing already emits
+  // compact output (no whitespace). We strip any residual whitespace to
+  // guarantee the smallest possible byte footprint under the firmware limit.
+  const compactJson = JSON.stringify(presetObj).replace(/\s+/g, '');
   const jsonBytes = new TextEncoder().encode(compactJson);
 
   // The checksum is computed over a TEMPORARY 4-byte-aligned copy (padding lives
