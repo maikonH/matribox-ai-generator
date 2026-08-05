@@ -238,24 +238,15 @@ export function buildPresetFile(preset: GeneratedPreset): string {
   const compactJson = JSON.stringify(presetObj);
   const jsonBytes = new TextEncoder().encode(compactJson);
 
-  // Align the UTF-8 payload to a strict 4-byte boundary before checksum and
-  // encryption, so the LFSR receives clean uint32 blocks and the Data Size
-  // field reflects the finalized aligned array.
-  const remainder = jsonBytes.length % 4;
-  const alignedBytes = remainder === 0
-    ? jsonBytes
-    : (() => {
-        const padded = new Uint8Array(jsonBytes.length + (4 - remainder));
-        padded.set(jsonBytes);
-        return padded;
-      })();
-
+  // The checksum is computed over a TEMPORARY 4-byte-aligned copy (padding lives
+  // only inside calculateChecksum). The exported payload stays the original,
+  // unpadded UTF-8 JSON so the pedal's JSON parser never sees trailing 0x00.
   const seed = Date.now() & 0xffffffff;
-  const checksum = calculateChecksum(alignedBytes);
-  const header = buildHeader(seed, checksum, alignedBytes.length);
+  const checksum = calculateChecksum(jsonBytes);
+  const header = buildHeader(seed, checksum, jsonBytes.length);
 
   const cipher = new LfsrCipher(seed);
-  const encryptedPayload = cipher.transform(alignedBytes);
+  const encryptedPayload = cipher.transform(jsonBytes);
 
   const finalBytes = new Uint8Array(header.length + encryptedPayload.length);
   finalBytes.set(header, 0);
