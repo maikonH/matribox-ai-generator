@@ -148,29 +148,45 @@ function buildPresetJson(preset: GeneratedPreset): PresetJson {
   };
 }
 
-// ── Stage 5: Raw Binary File Output ─────────────────────────────────────────
-export function buildPresetFile(preset: GeneratedPreset): Uint8Array {
+// ── Stage 5: Base64 Wrap & File Output ───────────────────────────────────────
+function bytesToBase64(bytes: Uint8Array): string {
+  const CHUNK = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+export function buildPresetFile(preset: GeneratedPreset): string {
   const { preset: sanitized } = sanitizePreset(preset);
   const presetObj = buildPresetJson(sanitized);
 
   const compactJson = JSON.stringify(presetObj).replace(/\s+/g, '');
   const jsonBytes = new TextEncoder().encode(compactJson);
 
+  const remainder = jsonBytes.length % 4;
+  const alignedJsonBytes =
+    remainder === 0 ? jsonBytes : new Uint8Array(jsonBytes.length + (4 - remainder));
+  if (remainder !== 0) alignedJsonBytes.set(jsonBytes);
+
   const seed = Date.now() & 0xffffffff;
-  const checksum = calculateChecksum(jsonBytes);
-  const header = buildHeader(seed, checksum, jsonBytes.length);
+  const checksum = calculateChecksum(alignedJsonBytes);
+  const header = buildHeader(seed, checksum, alignedJsonBytes.length);
   const cipher = new LfsrCipher(seed);
-  const encryptedPayload = cipher.transform(jsonBytes);
+  const encryptedPayload = cipher.transform(alignedJsonBytes);
 
   const finalBytes = new Uint8Array(header.length + encryptedPayload.length);
   finalBytes.set(header, 0);
   finalBytes.set(encryptedPayload, header.length);
-  return finalBytes;
+
+  const base64Data = bytesToBase64(finalBytes);
+  return JSON.stringify({ version: 1, data: base64Data });
 }
 
 export function downloadPresetFile(preset: GeneratedPreset): void {
-  const finalBytes = buildPresetFile(preset);
-  const blob = new Blob([finalBytes], { type: 'application/octet-stream' });
+  const fileContent = buildPresetFile(preset);
+  const blob = new Blob([fileContent], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
