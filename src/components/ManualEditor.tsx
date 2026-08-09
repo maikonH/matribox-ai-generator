@@ -557,7 +557,3 @@ function TrashDropzone({ visible, active }: { visible: boolean; active: boolean 
     </div>
   );
 }
-
-export default ManualEditor
-
-export { createManualPreset }
