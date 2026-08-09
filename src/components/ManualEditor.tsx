@@ -8,7 +8,7 @@ import {
   useSensors,
   useDraggable,
   useDroppable,
-  pointerWithin,
+  rectIntersection,
   type DragStartEvent,
   type DragEndEvent,
   type DragMoveEvent,
@@ -154,6 +154,7 @@ export default function ManualEditor({ algorithms, currentPreset, onPresetChange
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeDragType, setActiveDragType] = useState<string | null>(null);
+  const [showTrash, setShowTrash] = useState(false);
   const [overTrash, setOverTrash] = useState(false);
 
   const sensors = useSensors(
@@ -203,11 +204,14 @@ export default function ManualEditor({ algorithms, currentPreset, onPresetChange
   };
 
   const handleDragStart = (event: DragStartEvent) => {
-    setActiveId(String(event.active.id));
-    if (String(event.active.id).startsWith('palette-')) {
-      setActiveDragType(String(event.active.id).replace('palette-', ''));
+    const id = String(event.active.id);
+    setActiveId(id);
+    if (id.startsWith('palette-')) {
+      setActiveDragType(id.replace('palette-', ''));
+      setShowTrash(false);
     } else {
       setActiveDragType(null);
+      setShowTrash(true);
     }
   };
 
@@ -223,17 +227,33 @@ export default function ManualEditor({ algorithms, currentPreset, onPresetChange
 
     setActiveId(null);
     setActiveDragType(null);
+    setShowTrash(false);
     setOverTrash(false);
-
-    if (!overId) return;
 
     if (activeIdStr.startsWith('palette-')) {
       const type = activeIdStr.replace('palette-', '');
       const newModule = createModule(type, algorithms);
-      let insertIndex = chainItems.length;
-      if (overId !== 'chain-end' && !overId.startsWith('palette-')) {
-        const overIndex = chainItems.findIndex((item) => item.id === overId);
-        if (overIndex >= 0) insertIndex = overIndex;
+
+      if (!overId || overId === 'chain-end' || overId.startsWith('palette-')) {
+        commit([...chainItems, newModule]);
+        setSelectedId(newModule.id);
+        return;
+      }
+
+      const overIndex = chainItems.findIndex((item) => item.id === overId);
+      if (overIndex < 0) {
+        commit([...chainItems, newModule]);
+        setSelectedId(newModule.id);
+        return;
+      }
+
+      let insertIndex = overIndex;
+      const overRect = over?.rect;
+      const activeRect = active.rect.current.translated ?? active.rect.current.initial;
+      if (overRect && activeRect) {
+        const overCenter = overRect.left + overRect.width / 2;
+        const activeCenter = activeRect.left + activeRect.width / 2;
+        if (activeCenter > overCenter) insertIndex = overIndex + 1;
       }
       const newItems = [...chainItems];
       newItems.splice(insertIndex, 0, newModule);
@@ -242,7 +262,7 @@ export default function ManualEditor({ algorithms, currentPreset, onPresetChange
       return;
     }
 
-    if (overId === 'trash-zone') {
+    if (overId === 'trash-zone' || overId === null) {
       const newItems = chainItems.filter((item) => item.id !== activeIdStr);
       if (selectedId === activeIdStr) setSelectedId(newItems[0]?.id ?? null);
       commit(newItems);
@@ -264,7 +284,7 @@ export default function ManualEditor({ algorithms, currentPreset, onPresetChange
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={pointerWithin}
+      collisionDetection={rectIntersection}
       onDragStart={handleDragStart}
       onDragMove={handleDragMove}
       onDragEnd={handleDragEnd}
@@ -389,7 +409,7 @@ export default function ManualEditor({ algorithms, currentPreset, onPresetChange
         </section>
       </div>
 
-      <TrashDropzone active={overTrash} />
+      <TrashDropzone visible={showTrash} active={overTrash} />
 
       <DragOverlay dropAnimation={null}>
         {activeItem ? (
@@ -490,22 +510,27 @@ function ChainEndDropzone() {
   );
 }
 
-function TrashDropzone({ active }: { active: boolean }) {
+function TrashDropzone({ visible, active }: { visible: boolean; active: boolean }) {
   const { setNodeRef, isOver } = useDroppable({ id: 'trash-zone' });
-  const show = active || isOver;
+  const show = visible && (active || isOver);
   return (
     <div
       ref={setNodeRef}
       className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 transition-all duration-200 ${show ? 'opacity-100 scale-100' : 'opacity-0 scale-90 pointer-events-none'}`}
     >
-      <div className={`flex items-center gap-2 rounded-full border px-5 py-3 ${isOver ? 'border-red-500 bg-red-500/20 shadow-[0_0_24px_-4px_rgba(239,68,68,0.8)]' : 'border-[#1e293b] bg-[#131a26]/90 backdrop-blur'}`}>
-        <svg className={`w-5 h-5 ${isOver ? 'text-red-400' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div className={`flex items-center gap-2 rounded-full border px-5 py-3 ${isOver ? 'border-red-500 bg-red-500/20 shadow-[0_0_24px_-4px_rgba(239,68,68,0.8)]' : 'border-red-500/40 bg-red-950/40 backdrop-blur'}`}>
+        <svg className={`w-5 h-5 ${isOver ? 'text-red-400' : 'text-red-400/80'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
         </svg>
-        <span className={`text-xs font-semibold ${isOver ? 'text-red-300' : 'text-slate-400'}`}>
+        <span className={`text-xs font-semibold ${isOver ? 'text-red-300' : 'text-red-300/80'}`}>
           {isOver ? 'Solte para remover' : 'Arraste para a lixeira'}
         </span>
       </div>
     </div>
   );
 }
+
+
+export default ManualEditor
+
+export { createManualPreset }
