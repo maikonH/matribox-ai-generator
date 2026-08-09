@@ -5,11 +5,14 @@ import CaptureDiffModal from './components/CaptureDiffModal';
 import PromptBar from './components/PromptBar';
 import PresetCard from './components/PresetCard';
 import ToastContainer from './components/ToastContainer';
+import ManualEditor, { createManualPreset } from './components/ManualEditor';
 import { useToasts } from './hooks/useToasts';
 import { loadAlgorithms, setDevOverlay } from './lib/algorithmStore';
 import { ALGORITHM_COUNT } from './lib/algorithmCatalog';
 import { generatePreset, aiResponseToPreset } from './lib/gemini';
 import type { Algorithm, GeneratedPreset } from './lib/types';
+
+type Tab = 'ai' | 'manual';
 
 export default function App() {
   const [algorithms, setAlgorithms] = useState<Algorithm[]>(() => loadAlgorithms());
@@ -18,6 +21,8 @@ export default function App() {
   const [prompt, setPrompt] = useState('');
   const [preset, setPreset] = useState<GeneratedPreset | null>(null);
   const [loading, setLoading] = useState(false);
+  const [tab, setTab] = useState<Tab>('ai');
+  const [manualPreset, setManualPreset] = useState<GeneratedPreset | null>(null);
   const { toasts, showToast, dismiss } = useToasts();
 
   const runGeneration = useCallback(
@@ -64,34 +69,64 @@ export default function App() {
     [],
   );
 
+  const handleTabChange = useCallback((next: Tab) => {
+    setTab(next);
+    if (next === 'manual') {
+      setManualPreset((prev) => prev ?? createManualPreset(algorithms));
+    }
+  }, [algorithms]);
+
   return (
     <div className="min-h-screen bg-bg-900 text-slate-200">
       <Header algCount={ALGORITHM_COUNT} onOpenSettings={() => setSettingsOpen(true)} onOpenDiff={() => setDiffOpen(true)} />
 
-      <main className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        <div className="space-y-3">
-          <div className="text-center">
-            <h2 className="text-white font-bold text-2xl sm:text-3xl tracking-tight">
-              Gerar Preset por IA
-            </h2>
-            <p className="text-slate-400 text-sm mt-1">
-              Descreva o som e a IA monta a cadeia de sinal ideal com as regulagens de cada knob
-            </p>
+      <main className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        <div className="flex justify-center">
+          <div className="inline-flex rounded-xl border border-border bg-surface p-1 shadow-card">
+            <TabButton active={tab === 'ai'} onClick={() => handleTabChange('ai')}>
+              ✨ Gerador por IA
+            </TabButton>
+            <TabButton active={tab === 'manual'} onClick={() => handleTabChange('manual')}>
+              🎛️ Editor Manual
+            </TabButton>
           </div>
-          <PromptBar
-            value={prompt}
-            onChange={setPrompt}
-            onSubmit={handleGenerate}
-            loading={loading}
-            onQuickPrompt={handleQuickPrompt}
-          />
         </div>
 
-        <PresetCard
-          preset={preset}
-          loading={loading}
-          onParamChange={handleParamChange}
-        />
+        {tab === 'ai' && (
+          <div className="space-y-8 animate-fade-in">
+            <div className="space-y-3">
+              <div className="text-center">
+                <h2 className="text-white font-bold text-2xl sm:text-3xl tracking-tight">
+                  Gerar Preset por IA
+                </h2>
+                <p className="text-slate-400 text-sm mt-1">
+                  Descreva o som e a IA monta a cadeia de sinal ideal com as regulagens de cada knob
+                </p>
+              </div>
+              <PromptBar
+                value={prompt}
+                onChange={setPrompt}
+                onSubmit={handleGenerate}
+                loading={loading}
+                onQuickPrompt={handleQuickPrompt}
+              />
+            </div>
+
+            <PresetCard
+              preset={preset}
+              loading={loading}
+              onParamChange={handleParamChange}
+            />
+          </div>
+        )}
+
+        {tab === 'manual' && manualPreset && (
+          <ManualEditor
+            algorithms={algorithms}
+            currentPreset={manualPreset}
+            onPresetChange={setManualPreset}
+          />
+        )}
       </main>
 
       <SettingsDrawer
@@ -109,5 +144,20 @@ export default function App() {
 
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
+  );
+}
+
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-4 sm:px-6 h-10 rounded-lg text-sm font-semibold transition-all duration-200 ${
+        active
+          ? 'bg-gradient-to-r from-cyan-400 to-sky-500 text-slate-950 shadow-[0_0_18px_-6px_rgba(34,211,238,0.9)]'
+          : 'text-muted hover:text-slate-200'
+      }`}
+    >
+      {children}
+    </button>
   );
 }
