@@ -55,7 +55,7 @@ function slimFromAlgorithms(algorithms: Algorithm[]): SlimModule[] {
 
 // Canonical hardware module codes the AI is allowed to emit in `cadeia[].modulo`.
 // Kept in sync with HARDWARE_SLOTS in hardwareSlots.ts.
-const ALLOWED_MODULE_CODES = ['DYN', 'FREQ', 'WAH', 'DRV', 'AMP', 'CAB', 'MOD', 'DELAY', 'RVB', 'VOL'];
+const ALLOWED_MODULE_CODES = ['DYN', 'FREQ', 'WAH', 'DRV', 'AMP', 'CAB', 'EQ', 'MOD', 'DLY', 'RVB', 'VOL'];
 
 const SYSTEM_PROMPT = (catalog: SlimModule[]): string => {
   const catalogJson = JSON.stringify(catalog);
