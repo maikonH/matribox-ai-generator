@@ -326,9 +326,7 @@ export default function ManualEditor({ algorithms, currentPreset, onPresetChange
               <ChainEndDropzone />
             </ChainContainer>
           </SortableContext>
-          <p className="text-[11px] text-slate-500 mt-2">
-            Arraste para reordenar. Solte um bloco fora da cadeia ou na lixeira para remover.
-          </p>
+          <TrashDropzone visible={showTrash} active={overTrash} />
         </section>
 
         <section className="rounded-2xl border border-[#1e293b] bg-[#0b0f19] p-3 sm:p-4">
@@ -422,8 +420,6 @@ export default function ManualEditor({ algorithms, currentPreset, onPresetChange
           </div>
         </section>
       </div>
-
-      <TrashDropzone visible={showTrash} active={overTrash} />
 
       <DragOverlay dropAnimation={null}>
         {activeItem ? (
@@ -520,7 +516,7 @@ function PaletteButton({ type, icon, active, onClick }: {
 function ChainContainer({ children }: { children: React.ReactNode }) {
   const { setNodeRef } = useDroppable({ id: 'chain-container' });
   return (
-    <div ref={setNodeRef} className="flex gap-3 overflow-x-auto pb-2 min-h-[120px]">
+    <div ref={setNodeRef} className="flex justify-center gap-3 overflow-x-auto pb-2 min-h-[120px]">
       {children}
     </div>
   );
@@ -542,18 +538,21 @@ function TrashDropzone({ visible, active }: { visible: boolean; active: boolean 
   const { setNodeRef, isOver } = useDroppable({ id: 'trash-zone' });
   const show = visible && (active || isOver);
   return (
-    <div
-      ref={setNodeRef}
-      className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 transition-all duration-200 ${show ? 'opacity-100 scale-100' : 'opacity-0 scale-90 pointer-events-none'}`}
-    >
-      <div className={`flex items-center gap-2 rounded-full border px-5 py-3 ${isOver ? 'border-red-500 bg-red-500/20 shadow-[0_0_24px_-4px_rgba(239,68,68,0.8)]' : 'border-red-500/40 bg-red-950/40 backdrop-blur'}`}>
-        <svg className={`w-5 h-5 ${isOver ? 'text-red-400' : 'text-red-400/80'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
-        </svg>
-        <span className={`text-xs font-semibold ${isOver ? 'text-red-300' : 'text-red-300/80'}`}>
-          {isOver ? 'Solte para remover' : 'Arraste para a lixeira'}
-        </span>
-      </div>
+    <div ref={setNodeRef} className="mt-2">
+      {show ? (
+        <div className={`flex items-center justify-center gap-2 rounded-xl border px-5 py-3 transition-all duration-200 ${isOver ? 'border-red-500 bg-red-500/20 shadow-[0_0_24px_-4px_rgba(239,68,68,0.8)]' : 'border-red-500/40 bg-red-950/40 backdrop-blur'}`}>
+          <svg className={`w-5 h-5 ${isOver ? 'text-red-400' : 'text-red-400/80'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+          </svg>
+          <span className={`text-xs font-semibold ${isOver ? 'text-red-300' : 'text-red-300/80'}`}>
+            {isOver ? 'Solte para remover' : 'Arraste para a lixeira'}
+          </span>
+        </div>
+      ) : (
+        <p className="text-[11px] text-slate-500">
+          Arraste para reordenar. Solte um bloco fora da cadeia ou na lixeira para remover.
+        </p>
+      )}
     </div>
   );
 }
