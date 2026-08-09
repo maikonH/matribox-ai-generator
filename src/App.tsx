@@ -125,6 +125,7 @@ export default function App() {
             algorithms={algorithms}
             currentPreset={manualPreset}
             onPresetChange={setManualPreset}
+            onToast={showToast}
           />
         )}
       </main>

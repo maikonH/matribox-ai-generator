@@ -72,6 +72,7 @@ interface Props {
   algorithms: Algorithm[];
   currentPreset: GeneratedPreset;
   onPresetChange: (preset: GeneratedPreset) => void;
+  onToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
 type IconPair = { on: string; off: string; buttonOn: string; category: string };
@@ -149,7 +150,7 @@ function createModule(type: string, algorithms: Algorithm[]): ChainItem {
   };
 }
 
-export default function ManualEditor({ algorithms, currentPreset, onPresetChange }: Props) {
+export default function ManualEditor({ algorithms, currentPreset, onPresetChange, onToast }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -258,7 +259,10 @@ export default function ManualEditor({ algorithms, currentPreset, onPresetChange
     setPreviewIndex(null);
 
     if (activeIdStr.startsWith('palette-')) {
-      if (chainItems.length >= 12) return;
+      if (chainItems.length >= 12) {
+        onToast?.('Suporta até 12 módulos', 'info');
+        return;
+      }
 
       const type = activeIdStr.replace('palette-', '');
       const newModule = createModule(type, algorithms);
