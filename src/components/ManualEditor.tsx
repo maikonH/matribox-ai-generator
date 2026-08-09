@@ -8,7 +8,7 @@ import {
   useSensors,
   useDraggable,
   useDroppable,
-  rectIntersection,
+  closestCenter,
   type DragStartEvent,
   type DragEndEvent,
   type DragMoveEvent,
@@ -156,6 +156,7 @@ export default function ManualEditor({ algorithms, currentPreset, onPresetChange
   const [activeDragType, setActiveDragType] = useState<string | null>(null);
   const [showTrash, setShowTrash] = useState(false);
   const [overTrash, setOverTrash] = useState(false);
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -215,9 +216,34 @@ export default function ManualEditor({ algorithms, currentPreset, onPresetChange
     }
   };
 
+  const computeInsertIndex = (active: { rect: { current: { translated: { left: number; width: number } | null; initial: { left: number; width: number } | null } } }, over: { id: string | number; rect: { left: number; width: number } } | null): number | null => {
+    const overId = over ? String(over.id) : null;
+    if (!overId || overId === 'trash-zone' || overId.startsWith('palette-')) return null;
+    if (overId === 'chain-container') return chainItems.length;
+    if (overId === 'chain-end') return chainItems.length;
+
+    const overIndex = chainItems.findIndex((item) => item.id === overId);
+    if (overIndex < 0) return null;
+
+    let insertIndex = overIndex;
+    const overRect = over?.rect;
+    const activeRect = active.rect.current.translated ?? active.rect.current.initial;
+    if (overRect && activeRect) {
+      const overCenter = overRect.left + overRect.width / 2;
+      const activeCenter = activeRect.left + activeRect.width / 2;
+      if (activeCenter > overCenter) insertIndex = overIndex + 1;
+    }
+    return insertIndex;
+  };
+
   const handleDragMove = (event: DragMoveEvent) => {
-    const over = event.over;
-    setOverTrash(over ? String(over.id) === 'trash-zone' : false);
+    const { active, over } = event;
+    const overId = over ? String(over.id) : null;
+    setOverTrash(overId === 'trash-zone');
+
+    if (activeId?.startsWith('palette-')) {
+      setPreviewIndex(computeInsertIndex(active, over));
+    }
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -229,32 +255,19 @@ export default function ManualEditor({ algorithms, currentPreset, onPresetChange
     setActiveDragType(null);
     setShowTrash(false);
     setOverTrash(false);
+    setPreviewIndex(null);
 
     if (activeIdStr.startsWith('palette-')) {
       const type = activeIdStr.replace('palette-', '');
       const newModule = createModule(type, algorithms);
 
-      if (!overId || overId === 'chain-end' || overId.startsWith('palette-')) {
+      const insertIndex = computeInsertIndex(active, over);
+      if (insertIndex === null) {
         commit([...chainItems, newModule]);
         setSelectedId(newModule.id);
         return;
       }
 
-      const overIndex = chainItems.findIndex((item) => item.id === overId);
-      if (overIndex < 0) {
-        commit([...chainItems, newModule]);
-        setSelectedId(newModule.id);
-        return;
-      }
-
-      let insertIndex = overIndex;
-      const overRect = over?.rect;
-      const activeRect = active.rect.current.translated ?? active.rect.current.initial;
-      if (overRect && activeRect) {
-        const overCenter = overRect.left + overRect.width / 2;
-        const activeCenter = activeRect.left + activeRect.width / 2;
-        if (activeCenter > overCenter) insertIndex = overIndex + 1;
-      }
       const newItems = [...chainItems];
       newItems.splice(insertIndex, 0, newModule);
       commit(newItems);
@@ -284,7 +297,7 @@ export default function ManualEditor({ algorithms, currentPreset, onPresetChange
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={rectIntersection}
+      collisionDetection={closestCenter}
       onDragStart={handleDragStart}
       onDragMove={handleDragMove}
       onDragEnd={handleDragEnd}
@@ -299,18 +312,19 @@ export default function ManualEditor({ algorithms, currentPreset, onPresetChange
             <span className="text-xs text-slate-500">{chainItems.length} blocos</span>
           </div>
           <SortableContext items={chainItems.map((item) => item.id)} strategy={horizontalListSortingStrategy}>
-            <div className="flex gap-3 overflow-x-auto pb-2 min-h-[120px]">
-              {chainItems.map((item) => (
+            <ChainContainer>
+              {chainItems.map((item, index) => (
                 <SortableBlock
                   key={item.id}
                   item={item}
                   selected={selected?.id === item.id}
                   onSelect={() => setSelectedId(item.id)}
                   onToggle={() => toggleModule(item.id)}
+                  showGapBefore={previewIndex === index}
                 />
               ))}
               <ChainEndDropzone />
-            </div>
+            </ChainContainer>
           </SortableContext>
           <p className="text-[11px] text-slate-500 mt-2">
             Arraste para reordenar. Solte um bloco fora da cadeia ou na lixeira para remover.
@@ -422,11 +436,12 @@ export default function ManualEditor({ algorithms, currentPreset, onPresetChange
   );
 }
 
-function SortableBlock({ item, selected, onSelect, onToggle }: {
+function SortableBlock({ item, selected, onSelect, onToggle, showGapBefore }: {
   item: ChainItem;
   selected: boolean;
   onSelect: () => void;
   onToggle: () => void;
+  showGapBefore: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
   const icon = ICONS[item.type.toUpperCase()] ?? ICONS.AMP;
@@ -435,7 +450,11 @@ function SortableBlock({ item, selected, onSelect, onToggle }: {
   return (
     <div
       ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        marginLeft: showGapBefore ? '3rem' : '0',
+      }}
       className={`min-w-[92px] rounded-xl border p-2 transition-all ${isDragging ? 'opacity-40' : ''} ${
         selected
           ? 'border-cyan-400 bg-cyan-400/10 shadow-[0_0_18px_-8px_rgba(34,211,238,0.9)]'
@@ -498,6 +517,15 @@ function PaletteButton({ type, icon, active, onClick }: {
   );
 }
 
+function ChainContainer({ children }: { children: React.ReactNode }) {
+  const { setNodeRef } = useDroppable({ id: 'chain-container' });
+  return (
+    <div ref={setNodeRef} className="flex gap-3 overflow-x-auto pb-2 min-h-[120px]">
+      {children}
+    </div>
+  );
+}
+
 function ChainEndDropzone() {
   const { setNodeRef, isOver } = useDroppable({ id: 'chain-end' });
   return (
@@ -529,7 +557,6 @@ function TrashDropzone({ visible, active }: { visible: boolean; active: boolean 
     </div>
   );
 }
-
 
 export default ManualEditor
 
