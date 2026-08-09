@@ -1,4 +1,26 @@
 import { useMemo, useState } from 'react';
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  useDraggable,
+  useDroppable,
+  pointerWithin,
+  type DragStartEvent,
+  type DragEndEvent,
+  type DragMoveEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  useSortable,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  horizontalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import type { Algorithm, GeneratedPreset, PresetModule } from '../lib/types';
 import btnAmpOn from '../icons/chain_btn_amp_on.png';
 import btnCabOn from '../icons/chain_btn_cab&ir_on.png';
@@ -68,10 +90,16 @@ const ICONS: Record<string, IconPair> = {
   VOL: { on: imgVolOn, off: imgVolOff, buttonOn: btnVolOn, category: moduleVol },
 };
 
-const EDITOR_TYPES = ['DYN', 'DRV', 'AMP', 'CAB', 'EQ', 'MOD', 'DLY', 'RVB', 'VOL'];
+const CATEGORY_TYPES = ['DYN', 'FREQ', 'WAH', 'DRV', 'AMP', 'CAB', 'EQ', 'MOD', 'DLY', 'RVB', 'VOL'];
+
+let instanceCounter = 0;
+function nextInstanceId(type: string): string {
+  instanceCounter += 1;
+  return `${type.toLowerCase()}-instance-${instanceCounter}`;
+}
 
 export function createManualPreset(algorithms: Algorithm[]): GeneratedPreset {
-  const modules = EDITOR_TYPES.flatMap((type) => {
+  const modules = CATEGORY_TYPES.flatMap((type) => {
     const algorithm = algorithms.find((item) => item.type.toUpperCase() === type);
     if (!algorithm) return [];
     return [{
@@ -94,41 +122,78 @@ export function createManualPreset(algorithms: Algorithm[]): GeneratedPreset {
   };
 }
 
+type ChainItem = PresetModule & { id: string };
+
+function toChainItems(preset: GeneratedPreset): ChainItem[] {
+  return preset.modules.map((module, index) => ({
+    ...module,
+    id: (module as PresetModule & { id?: string }).id ?? `${module.type.toLowerCase()}-instance-${index + 1}`,
+  }));
+}
+
+function toPresetModules(items: ChainItem[]): PresetModule[] {
+  return items.map(({ id: _id, ...module }) => module);
+}
+
+function createModule(type: string, algorithms: Algorithm[]): ChainItem {
+  const algorithm = algorithms.find((item) => item.type.toUpperCase() === type) ?? algorithms[0];
+  return {
+    id: nextInstanceId(type),
+    fxId: algorithm.fxId,
+    fxTitle: algorithm.fxTitle,
+    name: algorithm.name,
+    type,
+    subType: type,
+    enabled: true,
+    params: algorithm.params.map((param) => ({ ...param })),
+  };
+}
+
 export default function ManualEditor({ algorithms, currentPreset, onPresetChange }: Props) {
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
-  const selectedModule = currentPreset.modules[selectedIndex] ?? currentPreset.modules[0];
-  const selectedType = selectedModule?.type.toUpperCase() ?? 'AMP';
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeDragType, setActiveDragType] = useState<string | null>(null);
+  const [overTrash, setOverTrash] = useState(false);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const chainItems = useMemo(() => toChainItems(currentPreset), [currentPreset]);
+  const selected = chainItems.find((item) => item.id === selectedId) ?? chainItems[0] ?? null;
+  const selectedType = selected?.type.toUpperCase() ?? 'AMP';
   const listType = categoryFilter ?? selectedType;
   const models = useMemo(
     () => algorithms.filter((algorithm) => algorithm.type.toUpperCase() === listType),
     [algorithms, listType],
   );
 
-  const updateModule = (index: number, update: (module: PresetModule) => PresetModule) => {
+  const commit = (items: ChainItem[]) => {
     onPresetChange({
       ...currentPreset,
-      modules: currentPreset.modules.map((module, moduleIndex) =>
-        moduleIndex === index ? update(module) : module,
-      ),
+      modules: toPresetModules(items),
     });
   };
 
-  const toggleModule = (index: number) => {
-    updateModule(index, (module) => ({ ...module, enabled: module.enabled === false }));
+  const updateItem = (id: string, update: (module: ChainItem) => ChainItem) => {
+    commit(chainItems.map((item) => (item.id === id ? update(item) : item)));
+  };
+
+  const toggleModule = (id: string) => {
+    updateItem(id, (module) => ({ ...module, enabled: module.enabled === false }));
   };
 
   const selectCategory = (type: string) => {
     setCategoryFilter(type);
-    const moduleIndex = currentPreset.modules.findIndex((module) => module.type.toUpperCase() === type);
-    if (moduleIndex >= 0) setSelectedIndex(moduleIndex);
+    const firstOfType = chainItems.find((item) => item.type.toUpperCase() === type);
+    if (firstOfType) setSelectedId(firstOfType.id);
   };
 
   const selectModel = (algorithm: Algorithm) => {
-    const moduleIndex = currentPreset.modules.findIndex((module) => module.type.toUpperCase() === algorithm.type.toUpperCase());
-    if (moduleIndex < 0) return;
-    setSelectedIndex(moduleIndex);
-    updateModule(moduleIndex, (module) => ({
+    if (!selected) return;
+    updateItem(selected.id, (module) => ({
       ...module,
       fxId: algorithm.fxId,
       fxTitle: algorithm.fxTitle,
@@ -137,146 +202,310 @@ export default function ManualEditor({ algorithms, currentPreset, onPresetChange
     }));
   };
 
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(String(event.active.id));
+    if (String(event.active.id).startsWith('palette-')) {
+      setActiveDragType(String(event.active.id).replace('palette-', ''));
+    } else {
+      setActiveDragType(null);
+    }
+  };
+
+  const handleDragMove = (event: DragMoveEvent) => {
+    const over = event.over;
+    setOverTrash(over ? String(over.id) === 'trash-zone' : false);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    const activeIdStr = String(active.id);
+    const overId = over ? String(over.id) : null;
+
+    setActiveId(null);
+    setActiveDragType(null);
+    setOverTrash(false);
+
+    if (!overId) return;
+
+    if (activeIdStr.startsWith('palette-')) {
+      const type = activeIdStr.replace('palette-', '');
+      const newModule = createModule(type, algorithms);
+      let insertIndex = chainItems.length;
+      if (overId !== 'chain-end' && !overId.startsWith('palette-')) {
+        const overIndex = chainItems.findIndex((item) => item.id === overId);
+        if (overIndex >= 0) insertIndex = overIndex;
+      }
+      const newItems = [...chainItems];
+      newItems.splice(insertIndex, 0, newModule);
+      commit(newItems);
+      setSelectedId(newModule.id);
+      return;
+    }
+
+    if (overId === 'trash-zone') {
+      const newItems = chainItems.filter((item) => item.id !== activeIdStr);
+      if (selectedId === activeIdStr) setSelectedId(newItems[0]?.id ?? null);
+      commit(newItems);
+      return;
+    }
+
+    if (activeIdStr !== overId) {
+      const oldIndex = chainItems.findIndex((item) => item.id === activeIdStr);
+      const newIndex = chainItems.findIndex((item) => item.id === overId);
+      if (oldIndex >= 0 && newIndex >= 0) {
+        commit(arrayMove(chainItems, oldIndex, newIndex));
+      }
+    }
+  };
+
+  const activeItem = activeId ? chainItems.find((item) => item.id === activeId) : null;
+  const isDraggingFromPalette = activeId?.startsWith('palette-') ?? false;
+
   return (
-    <div className="space-y-5 animate-fade-in">
-      <section className="rounded-2xl border border-[#1e293b] bg-[#0b0f19] p-4 sm:p-5 shadow-card">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-400 font-bold">Editor Manual</p>
-            <h2 className="text-white text-lg font-bold mt-1">Cadeia de Sinal</h2>
-          </div>
-          <span className="text-xs text-slate-500">{currentPreset.modules.length} blocos ativos</span>
-        </div>
-        <div className="flex gap-3 overflow-x-auto pb-2">
-          {currentPreset.modules.map((module, index) => {
-            const icon = ICONS[module.type.toUpperCase()] ?? ICONS.AMP;
-            const enabled = module.enabled !== false;
-            return (
-              <div
-                key={`${module.fxId}-${index}`}
-                className={`min-w-[92px] rounded-xl border p-2 transition-all ${
-                  selectedIndex === index
-                    ? 'border-cyan-400 bg-cyan-400/10 shadow-[0_0_18px_-8px_rgba(34,211,238,0.9)]'
-                    : 'border-[#1e293b] bg-[#131a26] hover:border-slate-600'
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => toggleModule(index)}
-                  className="mx-auto block h-7 w-12 rounded-md hover:bg-slate-800/60 transition-colors"
-                  aria-label={`${enabled ? 'Desligar' : 'Ligar'} ${module.name}`}
-                >
-                  <img src={enabled ? icon.buttonOn : btnOff} alt="" className="h-full w-full object-contain" />
-                </button>
-                <button type="button" onClick={() => setSelectedIndex(index)} className="w-full text-center">
-                  <img src={enabled ? icon.on : icon.off} alt={module.type} className="h-16 w-full object-contain mt-1" />
-                  <span className={`block truncate text-[11px] mt-1 ${enabled ? 'text-slate-200' : 'text-slate-600'}`}>
-                    {module.name}
-                  </span>
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="rounded-2xl border border-[#1e293b] bg-[#0b0f19] p-3 sm:p-4">
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {EDITOR_TYPES.map((type) => {
-            const icon = ICONS[type];
-            const active = listType === type;
-            return (
-              <button
-                key={type}
-                type="button"
-                onClick={() => selectCategory(type)}
-                className={`shrink-0 rounded-lg border p-1.5 transition-all ${active ? 'border-cyan-400 bg-cyan-400/10' : 'border-[#1e293b] bg-[#131a26] hover:border-slate-600'}`}
-                aria-label={`Filtrar ${type}`}
-              >
-                <img src={icon.category} alt={type} className="h-9 w-auto object-contain" />
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="grid grid-cols-1 lg:grid-cols-[minmax(180px,1fr)_minmax(0,3fr)] gap-4 rounded-2xl border border-[#1e293b] bg-[#0b0f19] p-4 sm:p-5">
-        <div className="min-w-0">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Modelos</p>
-              <h3 className="text-white font-semibold mt-1">{listType}</h3>
-            </div>
-            <span className="text-[10px] text-slate-500">{models.length}</span>
-          </div>
-          <div className="max-h-[360px] overflow-y-auto space-y-1 pr-1">
-            {models.map((algorithm) => {
-              const active = selectedModule?.fxId === algorithm.fxId;
-              return (
-                <button
-                  key={algorithm.fxId}
-                  type="button"
-                  onClick={() => selectModel(algorithm)}
-                  className={`w-full rounded-lg border px-3 py-2 text-left text-xs transition-all ${active ? 'border-cyan-400/70 bg-cyan-400/10 text-cyan-200' : 'border-transparent text-slate-400 hover:border-[#1e293b] hover:bg-[#131a26] hover:text-slate-200'}`}
-                >
-                  <span className="block truncate">{algorithm.name}</span>
-                  {active && <span className="text-[10px] text-cyan-400">Modelo atual</span>}
-                </button>
-              );
-            })}
-            {models.length === 0 && <p className="text-xs text-slate-600 py-6">Nenhum modelo nesta categoria.</p>}
-          </div>
-        </div>
-
-        <div className="border-t lg:border-t-0 lg:border-l border-[#1e293b] pt-4 lg:pt-0 lg:pl-5 min-w-0">
+    <DndContext
+      sensors={sensors}
+      collisionDetection={pointerWithin}
+      onDragStart={handleDragStart}
+      onDragMove={handleDragMove}
+      onDragEnd={handleDragEnd}
+    >
+      <div className="space-y-5 animate-fade-in">
+        <section className="rounded-2xl border border-[#1e293b] bg-[#0b0f19] p-4 sm:p-5 shadow-card">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Parâmetros</p>
-              <h3 className="text-white font-semibold mt-1">{selectedModule?.name ?? 'Selecione um bloco'}</h3>
+              <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-400 font-bold">Editor Manual</p>
+              <h2 className="text-white text-lg font-bold mt-1">Cadeia de Sinal Livre</h2>
             </div>
-            <span className="text-xs font-mono text-cyan-300">{selectedType}</span>
+            <span className="text-xs text-slate-500">{chainItems.length} blocos</span>
           </div>
-          {selectedModule ? (
-            <div className="space-y-5">
-              {selectedModule.params.map((param, paramIndex) => {
-                const range = param.max - param.min;
-                const percent = range > 0 ? ((param.value - param.min) / range) * 100 : 0;
+          <SortableContext items={chainItems.map((item) => item.id)} strategy={horizontalListSortingStrategy}>
+            <div className="flex gap-3 overflow-x-auto pb-2 min-h-[120px]">
+              {chainItems.map((item) => (
+                <SortableBlock
+                  key={item.id}
+                  item={item}
+                  selected={selected?.id === item.id}
+                  onSelect={() => setSelectedId(item.id)}
+                  onToggle={() => toggleModule(item.id)}
+                />
+              ))}
+              <ChainEndDropzone />
+            </div>
+          </SortableContext>
+          <p className="text-[11px] text-slate-500 mt-2">
+            Arraste para reordenar. Solte um bloco fora da cadeia ou na lixeira para remover.
+          </p>
+        </section>
+
+        <section className="rounded-2xl border border-[#1e293b] bg-[#0b0f19] p-3 sm:p-4">
+          <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500 mb-2">Arraste uma categoria para a cadeia</p>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {CATEGORY_TYPES.map((type) => {
+              const icon = ICONS[type];
+              const active = listType === type;
+              return (
+                <PaletteButton key={type} type={type} icon={icon.category} active={active} onClick={() => selectCategory(type)} />
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="grid grid-cols-1 lg:grid-cols-[minmax(180px,1fr)_minmax(0,3fr)] gap-4 rounded-2xl border border-[#1e293b] bg-[#0b0f19] p-4 sm:p-5">
+          <div className="min-w-0">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Modelos</p>
+                <h3 className="text-white font-semibold mt-1">{listType}</h3>
+              </div>
+              <span className="text-[10px] text-slate-500">{models.length}</span>
+            </div>
+            <div className="max-h-[360px] overflow-y-auto space-y-1 pr-1">
+              {models.map((algorithm) => {
+                const active = selected?.fxId === algorithm.fxId;
                 return (
-                  <div key={`${param.name}-${paramIndex}`} className="space-y-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-xs text-slate-300">{param.displayName || param.name}</span>
-                      <span className="text-xs font-mono text-cyan-300 tabular-nums">{Math.round(param.value)}</span>
-                    </div>
-                    <div className="relative h-2 rounded-full bg-slate-800">
-                      <div className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-cyan-400 to-sky-500" style={{ width: `${percent}%` }} />
-                      <input
-                        type="range"
-                        min={param.min}
-                        max={param.max}
-                        step={range > 10 ? 1 : 0.01}
-                        value={param.value}
-                        onChange={(event) => {
-                          const value = Number(event.target.value);
-                          updateModule(selectedIndex, (module) => ({
-                            ...module,
-                            params: module.params.map((item, index) => index === paramIndex ? { ...item, value } : item),
-                          }));
-                        }}
-                        className="absolute inset-0 h-2 w-full cursor-pointer opacity-0"
-                        aria-label={param.displayName || param.name}
-                      />
-                      <span className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-y-1/2 rounded-full border-2 border-cyan-200 bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.7)]" style={{ left: `calc(${percent}% - 8px)` }} />
-                    </div>
-                  </div>
+                  <button
+                    key={algorithm.fxId}
+                    type="button"
+                    onClick={() => selectModel(algorithm)}
+                    className={`w-full rounded-lg border px-3 py-2 text-left text-xs transition-all ${active ? 'border-cyan-400/70 bg-cyan-400/10 text-cyan-200' : 'border-transparent text-slate-400 hover:border-[#1e293b] hover:bg-[#131a26] hover:text-slate-200'}`}
+                  >
+                    <span className="block truncate">{algorithm.name}</span>
+                    {active && <span className="text-[10px] text-cyan-400">Modelo atual</span>}
+                  </button>
                 );
               })}
-              {selectedModule.params.length === 0 && <p className="text-sm text-slate-500">Este modelo não possui parâmetros ajustáveis.</p>}
+              {models.length === 0 && <p className="text-xs text-slate-600 py-6">Nenhum modelo nesta categoria.</p>}
             </div>
-          ) : (
-            <p className="text-sm text-slate-500">Selecione um bloco na cadeia para editar.</p>
-          )}
-        </div>
-      </section>
+          </div>
+
+          <div className="border-t lg:border-t-0 lg:border-l border-[#1e293b] pt-4 lg:pt-0 lg:pl-5 min-w-0">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Parâmetros</p>
+                <h3 className="text-white font-semibold mt-1">{selected?.name ?? 'Selecione um bloco'}</h3>
+              </div>
+              <span className="text-xs font-mono text-cyan-300">{selectedType}</span>
+            </div>
+            {selected ? (
+              <div className="space-y-5">
+                {selected.params.map((param, paramIndex) => {
+                  const range = param.max - param.min;
+                  const percent = range > 0 ? ((param.value - param.min) / range) * 100 : 0;
+                  return (
+                    <div key={`${param.name}-${paramIndex}`} className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-xs text-slate-300">{param.displayName || param.name}</span>
+                        <span className="text-xs font-mono text-cyan-300 tabular-nums">{Math.round(param.value)}</span>
+                      </div>
+                      <div className="relative h-2 rounded-full bg-slate-800">
+                        <div className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-cyan-400 to-sky-500" style={{ width: `${percent}%` }} />
+                        <input
+                          type="range"
+                          min={param.min}
+                          max={param.max}
+                          step={range > 10 ? 1 : 0.01}
+                          value={param.value}
+                          onChange={(event) => {
+                            const value = Number(event.target.value);
+                            updateItem(selected.id, (module) => ({
+                              ...module,
+                              params: module.params.map((item, index) => index === paramIndex ? { ...item, value } : item),
+                            }));
+                          }}
+                          className="absolute inset-0 h-2 w-full cursor-pointer opacity-0"
+                          aria-label={param.displayName || param.name}
+                        />
+                        <span className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-y-1/2 rounded-full border-2 border-cyan-200 bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.7)]" style={{ left: `calc(${percent}% - 8px)` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+                {selected.params.length === 0 && <p className="text-sm text-slate-500">Este modelo não possui parâmetros ajustáveis.</p>}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">Selecione ou arraste um bloco para a cadeia para editar.</p>
+            )}
+          </div>
+        </section>
+      </div>
+
+      <TrashDropzone active={overTrash} />
+
+      <DragOverlay dropAnimation={null}>
+        {activeItem ? (
+          <BlockGhost item={activeItem} />
+        ) : isDraggingFromPalette && activeDragType ? (
+          <BlockGhost item={createModule(activeDragType, algorithms)} />
+        ) : null}
+      </DragOverlay>
+    </DndContext>
+  );
+}
+
+function SortableBlock({ item, selected, onSelect, onToggle }: {
+  item: ChainItem;
+  selected: boolean;
+  onSelect: () => void;
+  onToggle: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
+  const icon = ICONS[item.type.toUpperCase()] ?? ICONS.AMP;
+  const enabled = item.enabled !== false;
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={`min-w-[92px] rounded-xl border p-2 transition-all ${isDragging ? 'opacity-40' : ''} ${
+        selected
+          ? 'border-cyan-400 bg-cyan-400/10 shadow-[0_0_18px_-8px_rgba(34,211,238,0.9)]'
+          : 'border-[#1e293b] bg-[#131a26] hover:border-slate-600'
+      }`}
+    >
+      <div className="flex justify-center">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="h-7 w-12 rounded-md hover:bg-slate-800/60 transition-colors"
+          aria-label={`${enabled ? 'Desligar' : 'Ligar'} ${item.name}`}
+        >
+          <img src={enabled ? icon.buttonOn : btnOff} alt="" className="h-full w-full object-contain" />
+        </button>
+      </div>
+      <button type="button" onClick={onSelect} className="w-full text-center mt-1" {...attributes} {...listeners}>
+        <img src={enabled ? icon.on : icon.off} alt={item.type} className="h-16 w-full object-contain" />
+        <span className={`block truncate text-[11px] mt-1 ${enabled ? 'text-slate-200' : 'text-slate-600'}`}>
+          {item.name}
+        </span>
+      </button>
+    </div>
+  );
+}
+
+function BlockGhost({ item }: { item: ChainItem }) {
+  const icon = ICONS[item.type.toUpperCase()] ?? ICONS.AMP;
+  const enabled = item.enabled !== false;
+  return (
+    <div className="min-w-[92px] rounded-xl border border-cyan-400 bg-[#131a26]/90 p-2 opacity-80 shadow-[0_0_24px_-4px_rgba(34,211,238,0.8)] pointer-events-none">
+      <div className="flex justify-center">
+        <img src={enabled ? icon.buttonOn : btnOff} alt="" className="h-7 w-12 object-contain" />
+      </div>
+      <img src={enabled ? icon.on : icon.off} alt={item.type} className="h-16 w-full object-contain mt-1" />
+      <span className="block truncate text-[11px] mt-1 text-slate-200">{item.name}</span>
+    </div>
+  );
+}
+
+function PaletteButton({ type, icon, active, onClick }: {
+  type: string;
+  icon: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `palette-${type}` });
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      onClick={onClick}
+      {...attributes}
+      {...listeners}
+      className={`shrink-0 rounded-lg border p-1.5 transition-all ${isDragging ? 'opacity-40' : ''} ${active ? 'border-cyan-400 bg-cyan-400/10' : 'border-[#1e293b] bg-[#131a26] hover:border-slate-600'}`}
+      aria-label={`Adicionar ${type}`}
+    >
+      <img src={icon} alt={type} className="h-9 w-auto object-contain" />
+    </button>
+  );
+}
+
+function ChainEndDropzone() {
+  const { setNodeRef, isOver } = useDroppable({ id: 'chain-end' });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`min-w-[40px] rounded-xl border-2 border-dashed flex items-center justify-center transition-all ${isOver ? 'border-cyan-400 bg-cyan-400/10' : 'border-[#1e293b] border-transparent'}`}
+    >
+      {isOver && <span className="text-[10px] text-cyan-400">+ soltar</span>}
+    </div>
+  );
+}
+
+function TrashDropzone({ active }: { active: boolean }) {
+  const { setNodeRef, isOver } = useDroppable({ id: 'trash-zone' });
+  const show = active || isOver;
+  return (
+    <div
+      ref={setNodeRef}
+      className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 transition-all duration-200 ${show ? 'opacity-100 scale-100' : 'opacity-0 scale-90 pointer-events-none'}`}
+    >
+      <div className={`flex items-center gap-2 rounded-full border px-5 py-3 ${isOver ? 'border-red-500 bg-red-500/20 shadow-[0_0_24px_-4px_rgba(239,68,68,0.8)]' : 'border-[#1e293b] bg-[#131a26]/90 backdrop-blur'}`}>
+        <svg className={`w-5 h-5 ${isOver ? 'text-red-400' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+        </svg>
+        <span className={`text-xs font-semibold ${isOver ? 'text-red-300' : 'text-slate-400'}`}>
+          {isOver ? 'Solte para remover' : 'Arraste para a lixeira'}
+        </span>
+      </div>
     </div>
   );
 }
