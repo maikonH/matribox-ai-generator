@@ -258,6 +258,8 @@ export default function ManualEditor({ algorithms, currentPreset, onPresetChange
     setPreviewIndex(null);
 
     if (activeIdStr.startsWith('palette-')) {
+      if (chainItems.length >= 12) return;
+
       const type = activeIdStr.replace('palette-', '');
       const newModule = createModule(type, algorithms);
 
