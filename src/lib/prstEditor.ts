@@ -186,7 +186,7 @@ function findFloatValues(bytes: number[], start: number, end: number): { start: 
   if (marker === -1) return { start: null, values: [] };
 
   const values: PrstFloat[] = [];
-  let offset = marker + 4;
+  let offset = marker + 2;
   while (offset + 3 < end) {
     if (isTailStart(bytes, offset, end)) break;
     if (bytes[offset] !== 0 || bytes[offset + 1] !== 0) break;
