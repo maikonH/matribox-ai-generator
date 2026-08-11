@@ -17,6 +17,7 @@ export interface PrstEffect {
   fxid: number;
   name: string;
   title: string;
+  type: string;
   widgets: PrstWidget[];
 }
 
@@ -64,10 +65,12 @@ interface RawAlgorithm {
   fxid?: unknown;
   fxtitle?: unknown;
   name?: unknown;
+  type?: unknown;
   widget?: RawWidget[];
 }
 
 interface RawModule {
+  name?: unknown;
   alg?: RawAlgorithm[];
 }
 
@@ -116,6 +119,7 @@ function buildEffects(): Map<number, PrstEffect> {
         fxid,
         name: trimValue(raw.name) || `FXID ${fxid}`,
         title: trimValue(raw.fxtitle),
+        type: trimValue(raw.type),
         widgets: (raw.widget ?? []).map(normalizeWidget).sort((a, b) => numberValue(a.id, 0) - numberValue(b.id, 0)),
       };
       effects.set(fxid, effect);
@@ -278,8 +282,26 @@ export function updateFloat(bytes: number[], offset: number, value: number): voi
 }
 
 export function updateFxid(bytes: number[], block: PrstBlock, newFxid: number): void {
-  const currentPrefix = block.encodedFxid & 0xffffff00;
-  writeUint32LE(bytes, block.fxidOffset, currentPrefix | (newFxid & 0xff));
+  writeUint32LE(bytes, block.fxidOffset, newFxid >>> 0);
+}
+
+export function reconcileFloats(bytes: number[], block: PrstBlock, newEffect: PrstEffect): void {
+  const oldWidgets = block.effect.widgets;
+  const newWidgets = newEffect.widgets;
+  const oldFloats = block.floats;
+  const floatStart = oldFloats.length > 0 ? oldFloats[0].offset : block.floatStart;
+  if (floatStart === null) return;
+
+  const maxCount = Math.max(oldWidgets.length, newWidgets.length);
+  for (let i = 0; i < maxCount; i++) {
+    const offset = floatStart + i * 4;
+    if (i < newWidgets.length) {
+      if (i < oldFloats.length) continue;
+      writeFloatLE(bytes, offset, newWidgets[i].defaultValue);
+    } else {
+      writeFloatLE(bytes, offset, 0);
+    }
+  }
 }
 
 export function normalizeWidgetValue(widget: PrstWidget, value: number): number {
@@ -293,7 +315,64 @@ export function effectsForWidgetCount(count: number): PrstEffect[] {
 }
 
 export function effectLabel(effect: PrstEffect): string {
-  return `${effect.name} · FXID ${effect.fxid} (0x${effect.fxid.toString(16).toUpperCase()})`;
+  return `${effect.name} · FXID ${effect.fxid} (0x${effect.fxid.toString(16).toUpperCase().padStart(8, '0')})`;
+}
+
+export interface AmpListItem {
+  fxid: number;
+  name: string;
+  type: string;
+  label: string;
+}
+
+let ampListCache: AmpListItem[] | null = null;
+
+export function getAmpList(): AmpListItem[] {
+  if (ampListCache) return ampListCache;
+  const modules = (algData as { Modules: RawModule[] }).Modules;
+  const ampModule = modules.find((m) => String(m.name ?? '').trim() === 'AMP');
+  const amps = ampModule?.alg ?? [];
+  ampListCache = amps.map((entry) => {
+    const fxid = toFxid(entry.fxid);
+    const name = String(entry.name ?? entry.fxtitle ?? `Algorithm ${fxid}`).trim();
+    const type = String(entry.type ?? '').trim();
+    const hex = `0x${fxid.toString(16).toUpperCase().padStart(8, '0')}`;
+    return { fxid, name, type, label: `${name} - FXID ${fxid} (${hex})` };
+  });
+  return ampListCache;
+}
+
+export interface AmpTypeGroup {
+  type: string;
+  amps: AmpListItem[];
+}
+
+let ampGroupCache: AmpTypeGroup[] | null = null;
+
+export function getAmpListGrouped(): AmpTypeGroup[] {
+  if (ampGroupCache) return ampGroupCache;
+  const amps = getAmpList();
+  const order = ['Clean', 'Drive', 'Hi Gain', 'Bass', 'Acoustic'];
+  const groups = new Map<string, AmpListItem[]>();
+  for (const amp of amps) {
+    const key = amp.type || 'Other';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(amp);
+  }
+  ampGroupCache = order
+    .filter((t) => groups.has(t))
+    .map((t) => ({ type: t, amps: groups.get(t)! }))
+    .concat(
+      [...groups.keys()]
+        .filter((t) => !order.includes(t))
+        .map((t) => ({ type: t, amps: groups.get(t)! })),
+    );
+  return ampGroupCache;
+}
+
+export function findEffectByFxid(fxid: number): PrstEffect | null {
+  const effects = Array.from(EFFECTS.values()).filter((e) => e.fxid === fxid);
+  return effects.length > 0 ? effects[0] : null;
 }
 
 export function bytesToBase64(bytes: number[]): string {

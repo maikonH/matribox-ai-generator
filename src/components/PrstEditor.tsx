@@ -3,10 +3,11 @@ import { AlertTriangle, Download, RotateCcw, Upload } from 'lucide-react';
 import {
   bytesToBase64,
   decodePrst,
-  effectLabel,
-  effectsForWidgetCount,
   encodePrst,
+  findEffectByFxid,
+  getAmpListGrouped,
   normalizeWidgetValue,
+  reconcileFloats,
   updateFloat,
   updateFxid,
   type BlockMode,
@@ -78,13 +79,9 @@ export default function PrstEditor() {
   }, [bytes, refreshFromBytes]);
 
   const handleEffectChange = useCallback((block: PrstBlock, effect: PrstEffect) => {
-    if (effect.widgets.length !== block.effect.widgets.length) return;
     const next = [...bytes];
     updateFxid(next, block, effect.fxid);
-    block.floats.forEach((float, index) => {
-      const widget = effect.widgets[index];
-      if (widget) updateFloat(next, float.offset, widget.defaultValue);
-    });
+    reconcileFloats(next, block, effect);
     refreshFromBytes(next);
   }, [bytes, refreshFromBytes]);
 
@@ -188,7 +185,7 @@ export default function PrstEditor() {
 }
 
 function BlockEditor({ block, bytes, onFloatChange, onEffectChange }: { block: PrstBlock; bytes: number[]; onFloatChange: (offset: number, value: number, widget?: PrstWidget) => void; onEffectChange: (block: PrstBlock, effect: PrstEffect) => void }) {
-  const candidates = effectsForWidgetCount(block.effect.widgets.length);
+  const ampGroups = useMemo(getAmpListGrouped, []);
   const widgets = block.effect.widgets;
   const widgetCount = widgets.length;
   const floats = block.floats;
@@ -197,17 +194,23 @@ function BlockEditor({ block, bytes, onFloatChange, onEffectChange }: { block: P
 
   return (
     <section className="rounded-xl border border-slate-800/60 bg-[#0b0f19] p-3 space-y-3">
-      <div className="flex flex-col lg:flex-row lg:items-center gap-2">
-        <div className="min-w-0">
+      <div className="flex flex-col lg:flex-row lg:items-start gap-2">
+        <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold text-white truncate">{block.effect.name}</div>
           <div className="text-[10px] font-mono text-slate-500">offset {block.start} · FXID {block.effect.fxid} · 0x{block.encodedFxid.toString(16).toUpperCase().padStart(8, '0')} · {mode}</div>
         </div>
-        {candidates.length > 1 && <select value={block.effect.fxid} onChange={(event) => {
-          const selected = candidates.find((effect) => effect.fxid === Number(event.target.value));
-          if (selected) onEffectChange(block, selected);
-        }} className="lg:ml-auto h-9 max-w-full rounded-lg bg-[#05080f] border border-slate-700 px-2 text-xs text-slate-200">
-          {candidates.map((effect) => <option key={effect.fxid} value={effect.fxid}>{effectLabel(effect)}</option>)}
-        </select>}
+        <div className="lg:ml-auto w-full lg:w-80">
+          <select value={block.effect.fxid} onChange={(event) => {
+            const selected = findEffectByFxid(Number(event.target.value));
+            if (selected) onEffectChange(block, selected);
+          }} className="w-full h-9 rounded-lg bg-[#05080f] border border-slate-700 px-2 text-xs text-slate-200">
+            {ampGroups.map((group) => (
+              <optgroup key={group.type} label={group.type}>
+                {group.amps.map((amp) => <option key={amp.fxid} value={amp.fxid}>{amp.label}</option>)}
+              </optgroup>
+            ))}
+          </select>
+        </div>
       </div>
       {block.warning && <div className="text-[11px] text-amber-200 bg-amber-400/10 border border-amber-400/20 rounded-lg px-2.5 py-2">{block.warning}</div>}
 
