@@ -28,11 +28,15 @@ export interface PrstFloat {
 
 export type BlockMode = 'matched' | 'compressed' | 'extra' | 'none';
 
+export type PrstBlockKind = 'amp' | 'cab';
+
 export interface PrstBlock {
   start: number;
   fxidOffset: number;
   encodedFxid: number;
   effect: PrstEffect;
+  kind: PrstBlockKind;
+  linkedCabByteOffset: number | null;
   floatStart: number | null;
   floats: PrstFloat[];
   mode: BlockMode;
@@ -129,6 +133,44 @@ function buildEffects(): Map<number, PrstEffect> {
 }
 
 const EFFECTS = buildEffects();
+const CAB_FXID_BASE = 167772160;
+const CAB_FXID_MAX = 167772229;
+
+function cabEffect(fxid: number): PrstEffect | undefined {
+  const effect = EFFECTS.get(fxid);
+  return effect && fxid >= CAB_FXID_BASE && fxid <= CAB_FXID_MAX ? effect : undefined;
+}
+
+function isLinkedCabHeader(bytes: number[], offset: number): boolean {
+  return bytes[offset + 1] === 0 && bytes[offset + 2] === 0 && bytes[offset + 3] === 188;
+}
+
+function findCabFloatValues(bytes: number[], start: number, end: number): { start: number | null; values: PrstFloat[] } {
+  for (let marker = start; marker + 3 < end; marker += 1) {
+    if (bytes[marker] !== 100 || bytes[marker + 1] !== 4 || bytes[marker + 2] !== 32 || bytes[marker + 3] !== 1) continue;
+    const values: PrstFloat[] = [];
+    let offset = marker + 4;
+    while (offset + 3 < end && values.length < 8) {
+      if (isTailStart(bytes, offset, end)) break;
+      const value = readFloatLE(bytes, offset);
+      if (!Number.isFinite(value) || Math.abs(value) > 20001) break;
+      values.push({ offset, value });
+      offset += 4;
+    }
+    return { start: values.length > 0 ? values[0].offset : marker + 4, values };
+  }
+  return { start: null, values: [] };
+}
+
+function blockMode(effect: PrstEffect, floats: PrstFloat[]): { mode: BlockMode; extraFloats: PrstFloat[]; warning: string } {
+  const widgetCount = effect.widgets.length;
+  const floatCount = floats.length;
+  if (floatCount === 0) return { mode: 'none', extraFloats: [], warning: 'Nenhum float encontrado para este bloco.' };
+  if (floatCount === widgetCount) return { mode: 'matched', extraFloats: [], warning: '' };
+  if (floatCount === 1 && widgetCount > 1) return { mode: 'compressed', extraFloats: [], warning: `Modo comprimido: 1 float encontrado para ${widgetCount} widgets. Mostrando defaults do catálogo como somente leitura.` };
+  if (floatCount > widgetCount) return { mode: 'extra', extraFloats: floats.slice(widgetCount), warning: `${floatCount} floats encontrados para ${widgetCount} widgets. Os primeiros ${widgetCount} foram mapeados; ${floatCount - widgetCount} extra(s) não mapeado(s).` };
+  return { mode: 'none', extraFloats: [], warning: `${floatCount} floats encontrados para ${widgetCount} widgets. Mapeamento incompleto — editando manualmente.` };
+}
 
 function readUint32LE(bytes: number[], offset: number): number {
   return ((bytes[offset] ?? 0) | ((bytes[offset + 1] ?? 0) << 8) | ((bytes[offset + 2] ?? 0) << 16) | ((bytes[offset + 3] ?? 0) * 0x1000000)) >>> 0;
@@ -261,34 +303,39 @@ export function decodePrst(base64: string): PrstDecoded {
     if (effect) starts.push({ start: i, fxidOffset: i + 1, encodedFxid, effect });
   }
 
-  const blocks = starts.map((block, index) => {
+  const blocks: PrstBlock[] = [];
+  starts.forEach((block, index) => {
     const end = starts[index + 1]?.start ?? bytes.length - 13;
-    const floats = findFloatValues(bytes, block.start + 5, end);
-    const widgetCount = block.effect.widgets.length;
-    const floatCount = floats.values.length;
-
-    let mode: BlockMode = 'none';
-    let extraFloats: PrstFloat[] = [];
-    let warning = '';
-
-    if (floatCount === 0) {
-      mode = 'none';
-      warning = 'Nenhum float encontrado para este bloco.';
-    } else if (floatCount === widgetCount) {
-      mode = 'matched';
-    } else if (floatCount === 1 && widgetCount > 1) {
-      mode = 'compressed';
-      warning = `Modo comprimido: 1 float encontrado para ${widgetCount} widgets. Mostrando defaults do catálogo como somente leitura.`;
-    } else if (floatCount > widgetCount) {
-      mode = 'extra';
-      extraFloats = floats.values.slice(widgetCount);
-      warning = `${floatCount} floats encontrados para ${widgetCount} widgets. Os primeiros ${widgetCount} foram mapeados; ${extraFloats.length} extra(s) não mapeado(s).`;
-    } else {
-      mode = 'none';
-      warning = `${floatCount} floats encontrados para ${widgetCount} widgets. Mapeamento incompleto — editando manualmente.`;
+    const isCab = Boolean(cabEffect(block.encodedFxid));
+    if (isCab) {
+      const floats = findFloatValues(bytes, block.start + 5, end);
+      blocks.push({ ...block, kind: 'cab', linkedCabByteOffset: null, floatStart: floats.start, floats: floats.values, ...blockMode(block.effect, floats.values) });
+      return;
     }
 
-    return { ...block, floatStart: floats.start, floats: floats.values, mode, extraFloats, warning };
+    const linkedCabByteOffset = block.start + 5;
+    const hasLinkedCab = isLinkedCabHeader(bytes, linkedCabByteOffset);
+    const ampEnd = hasLinkedCab ? linkedCabByteOffset : end;
+    const ampFloats = findFloatValues(bytes, block.start + 5, ampEnd);
+    blocks.push({ ...block, kind: 'amp', linkedCabByteOffset: hasLinkedCab ? linkedCabByteOffset : null, floatStart: ampFloats.start, floats: ampFloats.values, ...blockMode(block.effect, ampFloats.values) });
+
+    if (hasLinkedCab) {
+      const cabFxid = CAB_FXID_BASE + bytes[linkedCabByteOffset];
+      const effect = cabEffect(cabFxid);
+      if (!effect) return;
+      const cabFloats = findCabFloatValues(bytes, linkedCabByteOffset + 18, end);
+      blocks.push({
+        start: linkedCabByteOffset,
+        fxidOffset: linkedCabByteOffset,
+        encodedFxid: cabFxid,
+        effect,
+        kind: 'cab',
+        linkedCabByteOffset,
+        floatStart: cabFloats.start,
+        floats: cabFloats.values,
+        ...blockMode(effect, cabFloats.values),
+      });
+    }
   });
 
   return { bytes, name, timestamp, blocks };
@@ -303,6 +350,10 @@ export function updateFloat(bytes: number[], offset: number, value: number): voi
 }
 
 export function updateFxid(bytes: number[], block: PrstBlock, newFxid: number): void {
+  if (block.kind === 'cab' && block.linkedCabByteOffset !== null) {
+    bytes[block.linkedCabByteOffset] = newFxid - CAB_FXID_BASE;
+    return;
+  }
   writeUint32LE(bytes, block.fxidOffset, newFxid >>> 0);
 }
 
@@ -392,8 +443,19 @@ export function getAmpListGrouped(): AmpTypeGroup[] {
 }
 
 export function findEffectByFxid(fxid: number): PrstEffect | null {
-  const effects = Array.from(EFFECTS.values()).filter((e) => e.fxid === fxid);
-  return effects.length > 0 ? effects[0] : null;
+  return EFFECTS.get(fxid) ?? null;
+}
+
+export function getCabList(): AmpListItem[] {
+  const modules = (algData as { Modules: RawModule[] }).Modules;
+  const cabModule = modules.find((m) => String(m.name ?? '').trim() === 'CAB');
+  return (cabModule?.alg ?? []).map((entry) => {
+    const fxid = numberValue(entry.fxid, -1);
+    const name = String(entry.name ?? entry.fxtitle ?? `Algorithm ${fxid}`).trim();
+    const type = String(entry.type ?? '').trim();
+    const hex = `0x${fxid.toString(16).toUpperCase().padStart(8, '0')}`;
+    return { fxid, name, type, label: `${name} - FXID ${fxid} (${hex})` };
+  });
 }
 
 export function bytesToBase64(bytes: number[]): string {

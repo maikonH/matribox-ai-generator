@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Download, RotateCcw, Upload } from 'lucide-react';
 import {
   bytesToBase64,
@@ -6,11 +6,11 @@ import {
   encodePrst,
   findEffectByFxid,
   getAmpListGrouped,
+  getCabList,
   normalizeWidgetValue,
   reconcileFloats,
   updateFloat,
   updateFxid,
-  type BlockMode,
   type PrstBlock,
   type PrstDecoded,
   type PrstEffect,
@@ -25,6 +25,13 @@ export default function PrstEditor() {
   const [originalBytes, setOriginalBytes] = useState<number[]>([]);
   const [updateTimestamp, setUpdateTimestamp] = useState(true);
   const [error, setError] = useState('');
+  const [activeTab, setActiveTab] = useState<'amp' | 'cab'>('amp');
+
+  useEffect(() => {
+    if (!decoded) return;
+    const kinds = new Set(decoded.blocks.map((block) => block.kind));
+    if (!kinds.has(activeTab)) setActiveTab(decoded.blocks[0]?.kind ?? 'amp');
+  }, [decoded, activeTab]);
 
   const changedOffsets = useMemo(
     () => bytes.flatMap((byte, index) => (byte !== originalBytes[index] ? [index] : [])),
@@ -152,11 +159,22 @@ export default function PrstEditor() {
             </div>
           )}
 
-          <div className="space-y-3">
-            {decoded.blocks.map((block) => (
-              <BlockEditor key={`${block.start}-${block.encodedFxid}`} block={block} bytes={bytes} onFloatChange={handleFloatChange} onEffectChange={handleEffectChange} />
-            ))}
-          </div>
+          {decoded.blocks.length > 0 && (
+            <>
+              <div className="inline-flex rounded-lg border border-slate-800/60 bg-[#0b0f19] p-1">
+                {(['amp', 'cab'] as const).filter((kind) => decoded.blocks.some((block) => block.kind === kind)).map((kind) => (
+                  <button key={kind} onClick={() => setActiveTab(kind)} className={`px-4 h-8 rounded-md text-xs font-semibold transition-colors ${activeTab === kind ? 'bg-cyan-400 text-slate-950' : 'text-slate-400 hover:text-white'}`}>
+                    {kind.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+              <div className="space-y-3">
+                {decoded.blocks.filter((block) => block.kind === activeTab).map((block) => (
+                  <BlockEditor key={`${block.start}-${block.encodedFxid}`} block={block} bytes={bytes} onFloatChange={handleFloatChange} onEffectChange={handleEffectChange} />
+                ))}
+              </div>
+            </>
+          )}
 
           {changedOffsets.length > 0 && (
             <div className="rounded-xl border border-slate-800/60 bg-[#0b0f19] overflow-hidden">
@@ -186,8 +204,9 @@ export default function PrstEditor() {
 
 function BlockEditor({ block, bytes, onFloatChange, onEffectChange }: { block: PrstBlock; bytes: number[]; onFloatChange: (offset: number, value: number, widget?: PrstWidget) => void; onEffectChange: (block: PrstBlock, effect: PrstEffect) => void }) {
   const ampGroups = useMemo(getAmpListGrouped, []);
+  const cabList = useMemo(getCabList, []);
+  const isCab = block.kind === 'cab';
   const widgets = block.effect.widgets;
-  const widgetCount = widgets.length;
   const floats = block.floats;
   const floatCount = floats.length;
   const mode = block.mode;
@@ -204,7 +223,7 @@ function BlockEditor({ block, bytes, onFloatChange, onEffectChange }: { block: P
             const selected = findEffectByFxid(Number(event.target.value));
             if (selected) onEffectChange(block, selected);
           }} className="w-full h-9 rounded-lg bg-[#05080f] border border-slate-700 px-2 text-xs text-slate-200">
-            {ampGroups.map((group) => (
+            {isCab ? cabList.map((cab) => <option key={cab.fxid} value={cab.fxid}>{cab.label}</option>) : ampGroups.map((group) => (
               <optgroup key={group.type} label={group.type}>
                 {group.amps.map((amp) => <option key={amp.fxid} value={amp.fxid}>{amp.label}</option>)}
               </optgroup>
@@ -248,10 +267,9 @@ function BlockEditor({ block, bytes, onFloatChange, onEffectChange }: { block: P
 
       {mode === 'none' && floatCount > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {floats.map((f, index) => {
-            const widget = index < widgetCount ? widgets[index] : undefined;
-            return <FloatEditor key={f.offset} floatOffset={f.offset} value={readFloat(bytes, f.offset)} widget={widget} onChange={onFloatChange} />;
-          })}
+          {floats.map((f) => (
+            <FloatEditor key={f.offset} floatOffset={f.offset} value={readFloat(bytes, f.offset)} onChange={onFloatChange} />
+          ))}
         </div>
       )}
 
@@ -285,7 +303,8 @@ function FloatEditor({ floatOffset, value, widget, onChange }: { floatOffset: nu
   if (widget?.widgetType === 2 && widget.options.length > 0) {
     return <label className="space-y-1 text-xs text-slate-300"><span>{label}</span><select value={String(Math.round(value))} onChange={(event) => onChange(floatOffset, Number(event.target.value), widget)} className="w-full h-9 rounded-lg bg-[#05080f] border border-slate-700 px-2 text-xs text-slate-200">{widget.options.map((option, index) => <option key={option} value={index}>{option}</option>)}</select></label>;
   }
-  return <label className="space-y-1 text-xs text-slate-300"><span className="flex justify-between"><span>{label}</span><span className="font-mono text-slate-500">offset {floatOffset}</span></span><div className="flex items-center gap-2"><input type="range" min={min} max={max} step={step} value={Math.min(max, Math.max(min, value))} onChange={(event) => onChange(floatOffset, Number(event.target.value), widget)} className="flex-1 accent-cyan-400" /><input type="number" min={min} max={max} step={step} value={value} onChange={(event) => onChange(floatOffset, Number(event.target.value), widget)} className="w-24 h-8 rounded-lg bg-[#05080f] border border-slate-700 px-2 text-xs font-mono text-white" /></div></label>;
+  const displayValue = widget?.id === '5' && value === 19 || widget?.id === '6' && value === 20001 ? 'Off' : value.toFixed(3);
+  return <label className="space-y-1 text-xs text-slate-300"><span className="flex justify-between"><span>{label}</span><span className="font-mono text-slate-500">{displayValue} · offset {floatOffset}</span></span><div className="flex items-center gap-2"><input type="range" min={min} max={max} step={step} value={Math.min(max, Math.max(min, value))} onChange={(event) => onChange(floatOffset, Number(event.target.value), widget)} className="flex-1 accent-cyan-400" /><input type="number" min={min} max={max} step={step} value={value} onChange={(event) => onChange(floatOffset, Number(event.target.value), widget)} className="w-24 h-8 rounded-lg bg-[#05080f] border border-slate-700 px-2 text-xs font-mono text-white" /></div></label>;
 }
 
 function Meta({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
