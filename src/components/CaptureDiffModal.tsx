@@ -8,9 +8,10 @@ import {
   CheckCircle2,
   ArrowRight,
   FileDown,
+  Upload,
 } from 'lucide-react';
 import {
-  parseSysExHex,
+  parseCaptureInput,
   diffSysEx,
   summarizeDiff,
   toHex,
@@ -33,8 +34,8 @@ export default function CaptureDiffModal({ open, onClose }: Props) {
   const [changedText, setChangedText] = useState('');
   const [note, setNote] = useState('');
 
-  const baseline = useMemo(() => parseSysExHex(baselineText), [baselineText]);
-  const changed = useMemo(() => parseSysExHex(changedText), [changedText]);
+  const baseline = useMemo(() => parseCaptureInput(baselineText), [baselineText]);
+  const changed = useMemo(() => parseCaptureInput(changedText), [changedText]);
 
   const diff = useMemo(() => {
     if (baseline.error || changed.error) return null;
@@ -52,6 +53,12 @@ export default function CaptureDiffModal({ open, onClose }: Props) {
     setBaselineText('');
     setChangedText('');
     setNote('');
+  }, []);
+
+  const handleImport = useCallback(async (file: File, side: 'baseline' | 'changed') => {
+    const text = await file.text();
+    if (side === 'baseline') setBaselineText(text);
+    else setChangedText(text);
   }, []);
 
   const handleLoadSample = useCallback(() => {
@@ -128,18 +135,20 @@ export default function CaptureDiffModal({ open, onClose }: Props) {
             {/* Inputs */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <CaptureInput
-                label="Captura Base"
+                label="Preset Base"
                 tone="slate"
                 value={baselineText}
                 onChange={setBaselineText}
                 parsed={baseline}
+                onImport={(file) => void handleImport(file, 'baseline')}
               />
               <CaptureInput
-                label="Captura Alterada"
+                label="Preset Alterado"
                 tone="cyan"
                 value={changedText}
                 onChange={setChangedText}
                 parsed={changed}
+                onImport={(file) => void handleImport(file, 'changed')}
               />
             </div>
 
@@ -202,10 +211,11 @@ interface CaptureInputProps {
   tone: 'slate' | 'cyan';
   value: string;
   onChange: (v: string) => void;
-  parsed: ReturnType<typeof parseSysExHex>;
+  parsed: ReturnType<typeof parseCaptureInput>;
+  onImport: (file: File) => void;
 }
 
-function CaptureInput({ label, tone, value, onChange, parsed }: CaptureInputProps) {
+function CaptureInput({ label, tone, value, onChange, parsed, onImport }: CaptureInputProps) {
   const ring =
     tone === 'cyan'
       ? 'focus:border-cyan-500/60 focus:ring-cyan-500/10'
@@ -222,6 +232,23 @@ function CaptureInput({ label, tone, value, onChange, parsed }: CaptureInputProp
             {parsed.bytes.length}B{parsed.packetCount ? ` · ${parsed.packetCount} pkts` : ''}
           </span>
         )}
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] text-slate-500">Cole Base64, JSON ou hexadecimal</span>
+        <label className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-cyan-300 hover:text-cyan-200 cursor-pointer transition-colors">
+          <Upload className="w-3 h-3" />
+          Importar .prst
+          <input
+            type="file"
+            accept=".prst,.json,application/json,text/plain"
+            className="sr-only"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) onImport(file);
+              event.target.value = '';
+            }}
+          />
+        </label>
       </div>
       <textarea
         value={value}

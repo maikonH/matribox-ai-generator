@@ -102,6 +102,73 @@ export function parseSysExHex(input: string): ParsedSysEx {
   return { bytes, rawCount: matches.length, packetCount, notes, error };
 }
 
+function parsedPresetBytes(bytes: number[], source: string): ParsedSysEx {
+  if (bytes.length === 0) {
+    return { bytes: [], rawCount: 0, packetCount: 0, notes: [], error: `Nenhum byte encontrado no ${source}.` };
+  }
+
+  return {
+    bytes,
+    rawCount: bytes.length,
+    packetCount: 0,
+    notes: [`Preset ${source} interpretado como ${bytes.length} bytes brutos.`],
+    error: '',
+  };
+}
+
+function decodeBase64Preset(value: string, source: string): ParsedSysEx | null {
+  const normalized = value.replace(/\s+/g, '');
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(normalized) || normalized.length % 4 !== 0) return null;
+
+  try {
+    const decoded = atob(normalized);
+    const decodedText = Array.from(decoded, (char) => String.fromCharCode(char.charCodeAt(0)) ).join('');
+
+    try {
+      const parsed: unknown = JSON.parse(decodedText);
+      if (Array.isArray(parsed) && parsed.every((byte) => typeof byte === 'number' && Number.isInteger(byte) && byte >= 0 && byte <= 255)) {
+        return parsedPresetBytes(parsed, source);
+      }
+    } catch {
+      // The payload may be a binary SysEx instead of JSON.
+    }
+
+    return parsedPresetBytes(Array.from(decoded, (char) => char.charCodeAt(0)), source);
+  } catch {
+    return null;
+  }
+}
+
+function parsePresetText(input: string): ParsedSysEx | null {
+  try {
+    const parsed: unknown = JSON.parse(input);
+
+    if (Array.isArray(parsed) && parsed.every((byte) => typeof byte === 'number' && Number.isInteger(byte) && byte >= 0 && byte <= 255)) {
+      return parsedPresetBytes(parsed, 'JSON');
+    }
+
+    if (typeof parsed === 'string') return decodeBase64Preset(parsed, 'Base64');
+
+    if (typeof parsed === 'object' && parsed !== null && 'data' in parsed && typeof parsed.data === 'string') {
+      return decodeBase64Preset(parsed.data, '.prst');
+    }
+  } catch {
+    return decodeBase64Preset(input, 'Base64');
+  }
+
+  return null;
+}
+
+export function parseCaptureInput(input: string): ParsedSysEx {
+  const source = input.trim();
+  if (!source) return { bytes: [], rawCount: 0, packetCount: 0, notes: [], error: 'Nenhum dado encontrado.' };
+
+  const preset = parsePresetText(source);
+  if (preset) return preset;
+
+  return parseSysExHex(source);
+}
+
 // ── Diffing ───────────────────────────────────────────────────────────────────
 
 export type ByteKind = 'signature' | 'matrix' | 'fxid' | 'knob' | 'checksum' | 'terminator' | 'unknown';
