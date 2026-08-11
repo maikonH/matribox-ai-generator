@@ -153,9 +153,7 @@ const CAB_FXID_MAX = 167772229;
 
 function cabEffect(fxid: number): PrstEffect | undefined {
   const effect = EFFECTS.get(fxid);
-  if (effect && fxid >= CAB_FXID_BASE && fxid <= CAB_FXID_MAX) return effect;
-  if ((fxid >>> 24) === 0xac) return CAB_EFFECTS_BY_INDEX.get(fxid & 0xff);
-  return undefined;
+  return effect && fxid >= CAB_FXID_BASE && fxid <= CAB_FXID_MAX ? effect : undefined;
 }
 
 function isLinkedCabHeader(bytes: number[], offset: number): boolean {
@@ -206,10 +204,6 @@ function effectForEncodedFxid(encodedFxid: number): PrstEffect | undefined {
 
   const ampIndex = encodedFxid & 0xff;
   const encodedPrefix = encodedFxid >>> 24;
-  if (encodedPrefix === 0x0a || encodedPrefix === 0xac) {
-    const cab = CAB_EFFECTS_BY_INDEX.get(ampIndex);
-    if (cab) return cab;
-  }
   if (encodedPrefix === 4 || encodedPrefix === 5) {
     const amp = AMP_EFFECTS_BY_INDEX.get(ampIndex);
     if (amp) return amp;
@@ -323,8 +317,8 @@ export function decodePrst(base64: string): PrstDecoded {
   const nameBytes = nameEnd >= 0 ? bytes.slice(30, 30 + nameEnd) : bytes.slice(30, 62);
   const name = String.fromCharCode(...nameBytes).split('').filter((char) => char.charCodeAt(0) >= 32).join('').trim() || '(sem nome)';
   const timestamp = bytes.slice(26, 30).map((byte) => byte.toString(16).padStart(2, '0').toUpperCase()).join(' ');
-  const starts: Array<{ start: number; fxidOffset: number; encodedFxid: number; effect: PrstEffect }> = [];
 
+  const starts: Array<{ start: number; fxidOffset: number; encodedFxid: number; effect: PrstEffect }> = [];
   for (let i = 0; i + 4 < bytes.length; i += 1) {
     if (bytes[i] !== 255) continue;
     const encodedFxid = readUint32LE(bytes, i + 1);
@@ -332,40 +326,47 @@ export function decodePrst(base64: string): PrstDecoded {
     if (effect) starts.push({ start: i, fxidOffset: i + 1, encodedFxid, effect });
   }
 
-  const blocks: PrstBlock[] = [];
-  starts.forEach((block, index) => {
-    const end = starts[index + 1]?.start ?? bytes.length - 13;
+  const rawBlocks: Array<{ start: number; fxidOffset: number; encodedFxid: number; effect: PrstEffect; kind: PrstBlockKind; linkedCabByteOffset: number | null }> = [];
+  starts.forEach((block) => {
     const isCab = Boolean(cabEffect(block.encodedFxid));
     if (isCab) {
-      const floats = findFloatValues(bytes, block.start + 5, end);
-      blocks.push({ ...block, kind: 'cab', linkedCabByteOffset: null, floatStart: floats.start, floats: floats.values, ...blockMode(block.effect, floats.values) });
+      rawBlocks.push({ ...block, kind: 'cab', linkedCabByteOffset: null });
       return;
     }
-
     const linkedCabByteOffset = block.start + 5;
     const hasLinkedCab = isLinkedCabHeader(bytes, linkedCabByteOffset);
-    const ampEnd = hasLinkedCab ? linkedCabByteOffset : end;
-    const ampFloats = findFloatValues(bytes, block.start + 5, ampEnd);
-    blocks.push({ ...block, kind: 'amp', linkedCabByteOffset: hasLinkedCab ? linkedCabByteOffset : null, floatStart: ampFloats.start, floats: ampFloats.values, ...blockMode(block.effect, ampFloats.values) });
-
+    rawBlocks.push({ ...block, kind: 'amp', linkedCabByteOffset: hasLinkedCab ? linkedCabByteOffset : null });
     if (hasLinkedCab) {
       const cabFxid = CAB_FXID_BASE + bytes[linkedCabByteOffset];
       const effect = cabEffect(cabFxid);
-      if (!effect) return;
-      const cabFloats = findCabFloatValues(bytes, linkedCabByteOffset + 18, end);
-      blocks.push({
-        start: linkedCabByteOffset,
-        fxidOffset: linkedCabByteOffset,
-        encodedFxid: cabFxid,
-        effect,
-        kind: 'cab',
-        linkedCabByteOffset,
-        floatStart: cabFloats.start,
-        floats: cabFloats.values,
-        ...blockMode(effect, cabFloats.values),
-      });
+      if (effect) rawBlocks.push({ start: linkedCabByteOffset, fxidOffset: linkedCabByteOffset, encodedFxid: cabFxid, effect, kind: 'cab', linkedCabByteOffset });
     }
   });
+
+  const floatRegion = findSharedFloatRegion(bytes, starts);
+  const blocks: PrstBlock[] = [];
+  let floatCursor = floatRegion.start;
+  for (const raw of rawBlocks) {
+    const widgetCount = raw.effect.widgets.length;
+    const floats: PrstFloat[] = [];
+    if (floatCursor !== null && widgetCount > 0) {
+      for (let i = 0; i < widgetCount && floatCursor + 3 < floatRegion.end; i += 1) {
+        floats.push({ offset: floatCursor, value: readFloatLE(bytes, floatCursor) });
+        floatCursor += 4;
+      }
+    }
+    blocks.push({
+      start: raw.start,
+      fxidOffset: raw.fxidOffset,
+      encodedFxid: raw.encodedFxid,
+      effect: raw.effect,
+      kind: raw.kind,
+      linkedCabByteOffset: raw.linkedCabByteOffset,
+      floatStart: floats.length > 0 ? floats[0].offset : null,
+      floats,
+      ...blockMode(raw.effect, floats),
+    });
+  }
 
   return { bytes, name, timestamp, blocks };
 }
