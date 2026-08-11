@@ -148,33 +148,25 @@ for (const raw of cabModule?.alg ?? []) {
   const effect = EFFECTS.get(fxid);
   if (effect) CAB_EFFECTS_BY_INDEX.set(fxid & 0xff, effect);
 }
-const CAB_FXID_BASE = 167772160;
-const CAB_FXID_MAX = 167772229;
+const CAB_FXID_BASE = 167772160; // 0x0A000000
+const CAB_FXID_MAX = 167772229; // 0x0A000045
 
-function cabEffect(fxid: number): PrstEffect | undefined {
-  const effect = EFFECTS.get(fxid);
-  return effect && fxid >= CAB_FXID_BASE && fxid <= CAB_FXID_MAX ? effect : undefined;
+function normalizeCabFxid(encodedFxid: number): number {
+  const prefix = encodedFxid >>> 24;
+  if (prefix === 0x0a || prefix === 0xac) return CAB_FXID_BASE | (encodedFxid & 0xffffff);
+  const secondByte = (encodedFxid >>> 16) & 0xff;
+  if (prefix === 0x05 && secondByte === 0x01) return CAB_FXID_BASE | (encodedFxid & 0xffff);
+  return encodedFxid;
+}
+
+function cabEffect(encodedFxid: number): PrstEffect | undefined {
+  const catalogFxid = normalizeCabFxid(encodedFxid);
+  if (catalogFxid < CAB_FXID_BASE || catalogFxid > CAB_FXID_MAX) return undefined;
+  return EFFECTS.get(catalogFxid);
 }
 
 function isLinkedCabHeader(bytes: number[], offset: number): boolean {
   return bytes[offset + 1] === 0 && bytes[offset + 2] === 0 && bytes[offset + 3] === 188;
-}
-
-function findCabFloatValues(bytes: number[], start: number, end: number): { start: number | null; values: PrstFloat[] } {
-  for (let marker = start; marker + 3 < end; marker += 1) {
-    if (bytes[marker] !== 100 || bytes[marker + 1] !== 4 || bytes[marker + 2] !== 32 || bytes[marker + 3] !== 1) continue;
-    const values: PrstFloat[] = [];
-    let offset = marker + 4;
-    while (offset + 3 < end && values.length < 8) {
-      if (isTailStart(bytes, offset, end)) break;
-      const value = readFloatLE(bytes, offset);
-      if (!Number.isFinite(value) || Math.abs(value) > 20001) break;
-      values.push({ offset, value });
-      offset += 4;
-    }
-    return { start: values.length > 0 ? values[0].offset : marker + 4, values };
-  }
-  return { start: null, values: [] };
 }
 
 function blockMode(effect: PrstEffect, floats: PrstFloat[]): { mode: BlockMode; extraFloats: PrstFloat[]; warning: string } {
@@ -199,19 +191,17 @@ function writeUint32LE(bytes: number[], offset: number, value: number): void {
 }
 
 function effectForEncodedFxid(encodedFxid: number): PrstEffect | undefined {
-  const direct = EFFECTS.get(encodedFxid);
-  if (direct) return direct;
+  const cab = cabEffect(encodedFxid);
+  if (cab) return cab;
 
+  const prefix = encodedFxid >>> 24;
   const ampIndex = encodedFxid & 0xff;
-  const encodedPrefix = encodedFxid >>> 24;
-  if (encodedPrefix === 4 || encodedPrefix === 5) {
-    const amp = AMP_EFFECTS_BY_INDEX.get(ampIndex);
-    if (amp) return amp;
+  if (prefix === 0x07 || prefix === 0x08) return EFFECTS.get(encodedFxid);
+  if (prefix === 0x04 || prefix === 0x05) {
+    const secondByte = (encodedFxid >>> 16) & 0xff;
+    if (secondByte === 0x02) return AMP_EFFECTS_BY_INDEX.get(ampIndex);
   }
-
-  const lowByte = EFFECTS.get(ampIndex);
-  if (lowByte && (encodedFxid >>> 8) !== 0) return lowByte;
-  return undefined;
+  return EFFECTS.get(encodedFxid);
 }
 
 function readFloatLE(bytes: number[], offset: number): number {
@@ -244,27 +234,34 @@ function isTailStart(bytes: number[], pos: number, end: number): boolean {
   return false;
 }
 
-function findFloatValues(bytes: number[], start: number, end: number): { start: number | null; values: PrstFloat[] } {
+function findSharedFloatRegion(
+  bytes: number[],
+  starts: Array<{ start: number; effect: PrstEffect }>,
+): { start: number | null; end: number } {
+  const searchStart = starts.length > 0 ? Math.max(...starts.map((s) => s.start)) : 0;
+  const end = bytes.length;
   let marker = -1;
-  for (let i = start; i + 3 < end; i += 1) {
+  for (let i = searchStart; i + 3 < end; i += 1) {
     if (bytes[i] === FLOAT_MARKER[0] && bytes[i + 1] === FLOAT_MARKER[1] && bytes[i + 2] === FLOAT_MARKER[2] && bytes[i + 3] === FLOAT_MARKER[3]) {
       marker = i;
       break;
     }
   }
-  if (marker === -1) return { start: null, values: [] };
+  if (marker === -1) return { start: null, end };
 
-  const values: PrstFloat[] = [];
-  let offset = marker + 2;
-  while (offset + 3 < end) {
+  const totalExpected = starts.reduce((sum, s) => sum + s.effect.widgets.length, 0);
+  const floatStart = marker + 2;
+  let offset = floatStart;
+  let count = 0;
+  while (offset + 3 < end && count < totalExpected) {
     if (isTailStart(bytes, offset, end)) break;
-    if (bytes[offset] !== 0 || bytes[offset + 1] !== 0) break;
     const value = readFloatLE(bytes, offset);
     if (!Number.isFinite(value) || Math.abs(value) > 20001) break;
-    values.push({ offset, value });
+    if (value !== 0 && Math.abs(value) < 0.001) break;
     offset += 4;
+    count += 1;
   }
-  return { start: marker + 4, values };
+  return { start: floatStart, end: offset };
 }
 
 export function decodePrst(base64: string): PrstDecoded {
@@ -384,7 +381,18 @@ export function updateFxid(bytes: number[], block: PrstBlock, newFxid: number): 
     bytes[block.linkedCabByteOffset] = newFxid - CAB_FXID_BASE;
     return;
   }
-  writeUint32LE(bytes, block.fxidOffset, newFxid >>> 0);
+  const encodedPrefix = block.encodedFxid >>> 24;
+  let storedFxid = newFxid;
+  if (block.kind === 'cab' && encodedPrefix === 0xac) {
+    storedFxid = (encodedPrefix << 24) | (newFxid & 0xffffff);
+  } else if (block.kind === 'cab' && encodedPrefix === 0x05) {
+    const secondByte = (block.encodedFxid >>> 16) & 0xff;
+    storedFxid = (encodedPrefix << 24) | (secondByte << 16) | (newFxid & 0xff);
+  } else if (block.kind === 'amp' && (encodedPrefix === 0x04 || encodedPrefix === 0x05)) {
+    const secondByte = (block.encodedFxid >>> 16) & 0xff;
+    storedFxid = (encodedPrefix << 24) | (secondByte << 16) | (newFxid & 0xff);
+  }
+  writeUint32LE(bytes, block.fxidOffset, storedFxid >>> 0);
 }
 
 export function reconcileFloats(bytes: number[], block: PrstBlock, newEffect: PrstEffect): void {
