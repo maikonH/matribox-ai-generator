@@ -25,6 +25,8 @@ export interface PrstFloat {
   value: number;
 }
 
+export type BlockMode = 'matched' | 'compressed' | 'extra' | 'none';
+
 export interface PrstBlock {
   start: number;
   fxidOffset: number;
@@ -32,6 +34,8 @@ export interface PrstBlock {
   effect: PrstEffect;
   floatStart: number | null;
   floats: PrstFloat[];
+  mode: BlockMode;
+  extraFloats: PrstFloat[];
   warning: string;
 }
 
@@ -153,10 +157,28 @@ function writeFloatLE(bytes: number[], offset: number, value: number): void {
   bytes.splice(offset, 4, ...Array.from(new Uint8Array(buffer)));
 }
 
+const FLOAT_MARKER = [5, 1, 0, 0];
+const FLOAT_TAIL_PREFIXES = [
+  [52, 12, 0, 124, 3],
+  [12, 0, 124, 3],
+];
+
+function isTailStart(bytes: number[], pos: number, end: number): boolean {
+  for (const prefix of FLOAT_TAIL_PREFIXES) {
+    if (pos + prefix.length > end) continue;
+    let match = true;
+    for (let j = 0; j < prefix.length; j++) {
+      if (bytes[pos + j] !== prefix[j]) { match = false; break; }
+    }
+    if (match) return true;
+  }
+  return false;
+}
+
 function findFloatValues(bytes: number[], start: number, end: number): { start: number | null; values: PrstFloat[] } {
   let marker = -1;
   for (let i = start; i + 3 < end; i += 1) {
-    if (bytes[i] === 5 && bytes[i + 1] === 1 && bytes[i + 2] === 0 && bytes[i + 3] === 0) {
+    if (bytes[i] === FLOAT_MARKER[0] && bytes[i + 1] === FLOAT_MARKER[1] && bytes[i + 2] === FLOAT_MARKER[2] && bytes[i + 3] === FLOAT_MARKER[3]) {
       marker = i;
       break;
     }
@@ -164,11 +186,14 @@ function findFloatValues(bytes: number[], start: number, end: number): { start: 
   if (marker === -1) return { start: null, values: [] };
 
   const values: PrstFloat[] = [];
-  for (let offset = marker + 4; offset + 3 < end; offset += 4) {
+  let offset = marker + 4;
+  while (offset + 3 < end) {
+    if (isTailStart(bytes, offset, end)) break;
     if (bytes[offset] !== 0 || bytes[offset + 1] !== 0) break;
     const value = readFloatLE(bytes, offset);
     if (!Number.isFinite(value) || Math.abs(value) > 20001) break;
     values.push({ offset, value });
+    offset += 4;
   }
   return { start: marker + 4, values };
 }
@@ -213,12 +238,32 @@ export function decodePrst(base64: string): PrstDecoded {
 
   const blocks = starts.map((block, index) => {
     const end = starts[index + 1]?.start ?? bytes.length - 13;
-    const floats = findFloatValues(bytes, block.start + 5 + 12, end);
+    const floats = findFloatValues(bytes, block.start + 5, end);
     const widgetCount = block.effect.widgets.length;
-    const warning = floats.values.length === widgetCount
-      ? ''
-      : `Foram encontrados ${floats.values.length} floats para ${widgetCount} widgets. Os valores podem ser editados manualmente.`;
-    return { ...block, floatStart: floats.start, floats: floats.values, warning };
+    const floatCount = floats.values.length;
+
+    let mode: BlockMode = 'none';
+    let extraFloats: PrstFloat[] = [];
+    let warning = '';
+
+    if (floatCount === 0) {
+      mode = 'none';
+      warning = 'Nenhum float encontrado para este bloco.';
+    } else if (floatCount === widgetCount) {
+      mode = 'matched';
+    } else if (floatCount === 1 && widgetCount > 1) {
+      mode = 'compressed';
+      warning = `Modo comprimido: 1 float encontrado para ${widgetCount} widgets. Mostrando defaults do catálogo como somente leitura.`;
+    } else if (floatCount > widgetCount) {
+      mode = 'extra';
+      extraFloats = floats.values.slice(widgetCount);
+      warning = `${floatCount} floats encontrados para ${widgetCount} widgets. Os primeiros ${widgetCount} foram mapeados; ${extraFloats.length} extra(s) não mapeado(s).`;
+    } else {
+      mode = 'none';
+      warning = `${floatCount} floats encontrados para ${widgetCount} widgets. Mapeamento incompleto — editando manualmente.`;
+    }
+
+    return { ...block, floatStart: floats.start, floats: floats.values, mode, extraFloats, warning };
   });
 
   return { bytes, name, timestamp, blocks };

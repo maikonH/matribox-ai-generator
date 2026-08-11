@@ -9,6 +9,7 @@ import {
   normalizeWidgetValue,
   updateFloat,
   updateFxid,
+  type BlockMode,
   type PrstBlock,
   type PrstDecoded,
   type PrstEffect,
@@ -188,13 +189,18 @@ export default function PrstEditor() {
 
 function BlockEditor({ block, bytes, onFloatChange, onEffectChange }: { block: PrstBlock; bytes: number[]; onFloatChange: (offset: number, value: number, widget?: PrstWidget) => void; onEffectChange: (block: PrstBlock, effect: PrstEffect) => void }) {
   const candidates = effectsForWidgetCount(block.effect.widgets.length);
-  const matched = block.floats.length === block.effect.widgets.length;
+  const widgets = block.effect.widgets;
+  const widgetCount = widgets.length;
+  const floats = block.floats;
+  const floatCount = floats.length;
+  const mode = block.mode;
+
   return (
     <section className="rounded-xl border border-slate-800/60 bg-[#0b0f19] p-3 space-y-3">
       <div className="flex flex-col lg:flex-row lg:items-center gap-2">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-white truncate">{block.effect.name}</div>
-          <div className="text-[10px] font-mono text-slate-500">offset {block.start} · FXID {block.effect.fxid} · 0x{block.encodedFxid.toString(16).toUpperCase().padStart(8, '0')}</div>
+          <div className="text-[10px] font-mono text-slate-500">offset {block.start} · FXID {block.effect.fxid} · 0x{block.encodedFxid.toString(16).toUpperCase().padStart(8, '0')} · {mode}</div>
         </div>
         {candidates.length > 1 && <select value={block.effect.fxid} onChange={(event) => {
           const selected = candidates.find((effect) => effect.fxid === Number(event.target.value));
@@ -204,13 +210,64 @@ function BlockEditor({ block, bytes, onFloatChange, onEffectChange }: { block: P
         </select>}
       </div>
       {block.warning && <div className="text-[11px] text-amber-200 bg-amber-400/10 border border-amber-400/20 rounded-lg px-2.5 py-2">{block.warning}</div>}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {block.floats.map((float, index) => {
-          const widget = matched ? block.effect.widgets[index] : undefined;
-          return <FloatEditor key={float.offset} floatOffset={float.offset} value={readFloat(bytes, float.offset)} widget={widget} onChange={onFloatChange} />;
-        })}
-      </div>
+
+      {mode === 'matched' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {widgets.map((widget, index) => (
+            <FloatEditor key={widget.id ?? index} floatOffset={floats[index].offset} value={readFloat(bytes, floats[index].offset)} widget={widget} onChange={onFloatChange} />
+          ))}
+        </div>
+      )}
+
+      {mode === 'compressed' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {widgets.map((widget, index) => (
+            <ReadOnlyFloat key={widget.id ?? index} label={widget.name} value={widget.defaultValue} unit="" />
+          ))}
+        </div>
+      )}
+
+      {mode === 'extra' && (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {widgets.map((widget, index) => (
+              <FloatEditor key={widget.id ?? index} floatOffset={floats[index].offset} value={readFloat(bytes, floats[index].offset)} widget={widget} onChange={onFloatChange} />
+            ))}
+          </div>
+          <div className="rounded-lg border border-slate-800/40 bg-[#05080f] px-3 py-2 space-y-1">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500">Floats extra (não mapeados)</div>
+            {block.extraFloats.map((f) => (
+              <div key={f.offset} className="text-[11px] font-mono text-slate-500">offset {f.offset}: {f.value.toFixed(3)}</div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {mode === 'none' && floatCount > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {floats.map((f, index) => {
+            const widget = index < widgetCount ? widgets[index] : undefined;
+            return <FloatEditor key={f.offset} floatOffset={f.offset} value={readFloat(bytes, f.offset)} widget={widget} onChange={onFloatChange} />;
+          })}
+        </div>
+      )}
+
+      {mode === 'none' && floatCount === 0 && (
+        <p className="text-xs text-slate-500 py-2">Nenhum float editável encontrado para este bloco.</p>
+      )}
     </section>
+  );
+}
+
+function ReadOnlyFloat({ label, value, unit }: { label: string; value: number; unit?: string }) {
+  return (
+    <div className="rounded-lg border border-slate-800/60 px-3 py-2 text-xs text-slate-400 opacity-70">
+      <div className="flex items-center justify-between">
+        <span>{label}</span>
+        <span className="font-mono text-slate-500">{value.toFixed(3)}{unit ? ` ${unit}` : ''}</span>
+      </div>
+      <div className="text-[10px] text-slate-600 mt-0.5">somente leitura (modo comprimido)</div>
+    </div>
   );
 }
 
