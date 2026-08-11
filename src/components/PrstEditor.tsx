@@ -267,7 +267,26 @@ function BlockEditor({ block, bytes, onFloatChange, onEffectChange }: { block: P
 
       {mode === 'none' && floatCount > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {floats.map((f) => (
+          {widgets.length > 0 ? widgets.map((widget, index) => {
+            const float = floats[index];
+            return float ? (
+              <FloatEditor
+                key={widget.id ?? index}
+                floatOffset={float.offset}
+                value={readFloat(bytes, float.offset)}
+                widget={widget}
+                onChange={onFloatChange}
+              />
+            ) : (
+              <ReadOnlyFloat
+                key={widget.id ?? index}
+                label={widget.name}
+                value={widget.defaultValue}
+                unit=""
+                reason="não encontrado no arquivo"
+              />
+            );
+          }) : floats.map((f) => (
             <FloatEditor key={f.offset} floatOffset={f.offset} value={readFloat(bytes, f.offset)} onChange={onFloatChange} />
           ))}
         </div>
@@ -280,14 +299,14 @@ function BlockEditor({ block, bytes, onFloatChange, onEffectChange }: { block: P
   );
 }
 
-function ReadOnlyFloat({ label, value, unit }: { label: string; value: number; unit?: string }) {
+function ReadOnlyFloat({ label, value, unit, reason = 'modo comprimido' }: { label: string; value: number; unit?: string; reason?: string }) {
   return (
     <div className="rounded-lg border border-slate-800/60 px-3 py-2 text-xs text-slate-400 opacity-70">
       <div className="flex items-center justify-between">
         <span>{label}</span>
         <span className="font-mono text-slate-500">{value.toFixed(3)}{unit ? ` ${unit}` : ''}</span>
       </div>
-      <div className="text-[10px] text-slate-600 mt-0.5">somente leitura (modo comprimido)</div>
+      <div className="text-[10px] text-slate-600 mt-0.5">somente leitura ({reason})</div>
     </div>
   );
 }
