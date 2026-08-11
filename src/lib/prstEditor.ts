@@ -133,12 +133,29 @@ function buildEffects(): Map<number, PrstEffect> {
 }
 
 const EFFECTS = buildEffects();
+const AMP_EFFECTS_BY_INDEX = new Map<number, PrstEffect>();
+const CAB_EFFECTS_BY_INDEX = new Map<number, PrstEffect>();
+const catalogModules = (algData as RawCatalog).Modules ?? [];
+const ampModule = catalogModules.find((module) => trimValue(module.name) === 'AMP');
+const cabModule = catalogModules.find((module) => trimValue(module.name) === 'CAB');
+for (const raw of ampModule?.alg ?? []) {
+  const fxid = numberValue(raw.fxid, -1);
+  const effect = EFFECTS.get(fxid);
+  if (effect) AMP_EFFECTS_BY_INDEX.set(fxid & 0xff, effect);
+}
+for (const raw of cabModule?.alg ?? []) {
+  const fxid = numberValue(raw.fxid, -1);
+  const effect = EFFECTS.get(fxid);
+  if (effect) CAB_EFFECTS_BY_INDEX.set(fxid & 0xff, effect);
+}
 const CAB_FXID_BASE = 167772160;
 const CAB_FXID_MAX = 167772229;
 
 function cabEffect(fxid: number): PrstEffect | undefined {
   const effect = EFFECTS.get(fxid);
-  return effect && fxid >= CAB_FXID_BASE && fxid <= CAB_FXID_MAX ? effect : undefined;
+  if (effect && fxid >= CAB_FXID_BASE && fxid <= CAB_FXID_MAX) return effect;
+  if ((fxid >>> 24) === 0xac) return CAB_EFFECTS_BY_INDEX.get(fxid & 0xff);
+  return undefined;
 }
 
 function isLinkedCabHeader(bytes: number[], offset: number): boolean {
@@ -186,7 +203,19 @@ function writeUint32LE(bytes: number[], offset: number, value: number): void {
 function effectForEncodedFxid(encodedFxid: number): PrstEffect | undefined {
   const direct = EFFECTS.get(encodedFxid);
   if (direct) return direct;
-  const lowByte = EFFECTS.get(encodedFxid & 0xff);
+
+  const ampIndex = encodedFxid & 0xff;
+  const encodedPrefix = encodedFxid >>> 24;
+  if (encodedPrefix === 0x0a || encodedPrefix === 0xac) {
+    const cab = CAB_EFFECTS_BY_INDEX.get(ampIndex);
+    if (cab) return cab;
+  }
+  if (encodedPrefix === 4 || encodedPrefix === 5) {
+    const amp = AMP_EFFECTS_BY_INDEX.get(ampIndex);
+    if (amp) return amp;
+  }
+
+  const lowByte = EFFECTS.get(ampIndex);
   if (lowByte && (encodedFxid >>> 8) !== 0) return lowByte;
   return undefined;
 }
