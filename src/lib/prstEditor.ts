@@ -203,7 +203,28 @@ function findFloatValues(bytes: number[], start: number, end: number): { start: 
 }
 
 export function decodePrst(base64: string): PrstDecoded {
-  const normalized = base64.trim().replace(/^data:[^,]+,/, '').replace(/\s+/g, '');
+  const source = base64.trim();
+  let payload = source;
+
+  if (source.startsWith('{')) {
+    let parsedWrapper: unknown;
+    try {
+      parsedWrapper = JSON.parse(source);
+    } catch {
+      throw new Error('O arquivo .prst não contém um JSON válido.');
+    }
+    if (
+      !parsedWrapper ||
+      typeof parsedWrapper !== 'object' ||
+      !('data' in parsedWrapper) ||
+      typeof parsedWrapper.data !== 'string'
+    ) {
+      throw new Error('O arquivo .prst não contém os dados esperados.');
+    }
+    payload = parsedWrapper.data;
+  }
+
+  const normalized = payload.replace(/^data:[^,]+,/, '').replace(/\s+/g, '');
   if (!normalized || !/^[A-Za-z0-9+/]+={0,2}$/.test(normalized) || normalized.length % 4 !== 0) {
     throw new Error('O conteúdo precisa ser uma string Base64 válida.');
   }
@@ -333,7 +354,7 @@ export function getAmpList(): AmpListItem[] {
   const ampModule = modules.find((m) => String(m.name ?? '').trim() === 'AMP');
   const amps = ampModule?.alg ?? [];
   ampListCache = amps.map((entry) => {
-    const fxid = toFxid(entry.fxid);
+    const fxid = numberValue(entry.fxid, -1);
     const name = String(entry.name ?? entry.fxtitle ?? `Algorithm ${fxid}`).trim();
     const type = String(entry.type ?? '').trim();
     const hex = `0x${fxid.toString(16).toUpperCase().padStart(8, '0')}`;
