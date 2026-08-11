@@ -20,6 +20,7 @@ import {
   type ByteDiff,
   type DiffSummary,
 } from '../lib/captureDiff';
+import PrstEditor from './PrstEditor';
 
 interface Props {
   open: boolean;
@@ -33,6 +34,7 @@ export default function CaptureDiffModal({ open, onClose }: Props) {
   const [baselineText, setBaselineText] = useState('');
   const [changedText, setChangedText] = useState('');
   const [note, setNote] = useState('');
+  const [view, setView] = useState<'diff' | 'editor'>('diff');
 
   const baseline = useMemo(() => parseCaptureInput(baselineText), [baselineText]);
   const changed = useMemo(() => parseCaptureInput(changedText), [changedText]);
@@ -120,7 +122,15 @@ export default function CaptureDiffModal({ open, onClose }: Props) {
             </button>
           </div>
 
+          <div className="px-5 pt-3 border-b border-slate-800/60">
+            <div className="inline-flex rounded-lg border border-slate-800/60 bg-[#0b0f19] p-1">
+              <button onClick={() => setView('diff')} className={`px-3 h-8 rounded-md text-xs font-semibold transition-colors ${view === 'diff' ? 'bg-cyan-400 text-slate-950' : 'text-slate-400 hover:text-white'}`}>Diff de Captura</button>
+              <button onClick={() => setView('editor')} className={`px-3 h-8 rounded-md text-xs font-semibold transition-colors ${view === 'editor' ? 'bg-cyan-400 text-slate-950' : 'text-slate-400 hover:text-white'}`}>Editor PRST</button>
+            </div>
+          </div>
+
           <div className="flex-1 overflow-y-auto p-5 space-y-5">
+            {view === 'editor' ? <PrstEditor /> : <>
             {/* Intro */}
             <div className="flex items-start gap-3 rounded-xl border border-sky-500/20 bg-sky-500/5 px-4 py-3">
               <Info className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
@@ -197,6 +207,7 @@ export default function CaptureDiffModal({ open, onClose }: Props) {
             {canCompare && diff && (
               <DiffResultView diff={diff} summaries={summaries} note={note} />
             )}
+            </>}
           </div>
         </div>
       </div>

@@ -133,7 +133,11 @@ function toChainItems(preset: GeneratedPreset): ChainItem[] {
 }
 
 function toPresetModules(items: ChainItem[]): PresetModule[] {
-  return items.map(({ id: _id, ...module }) => module);
+  return items.map((item) => {
+    const { id, ...module } = item;
+    void id;
+    return module;
+  });
 }
 
 function createModule(type: string, algorithms: Algorithm[]): ChainItem {
